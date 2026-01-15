@@ -1,0 +1,9 @@
+Write a concise git commit message for the changes.
+Commit only the current changes in the working tree. After committing, ensure `git status` is clean.
+Format:
+<type>: <summary>
+
+Rules:
+- Use imperative mood.
+- Keep summary under 72 characters.
+- Pick a sensible type (feat, fix, chore, refactor, test, docs).
