@@ -3,6 +3,11 @@
 import { PythonCompiler } from './compiler';
 import * as fs from 'fs';
 
+// Ensure deterministic Python set hashing for test comparisons
+if (!process.env.PYTHONHASHSEED) {
+  process.env.PYTHONHASHSEED = '6301';
+}
+
 // 导出公共 API
 export { PythonCompiler };
 
