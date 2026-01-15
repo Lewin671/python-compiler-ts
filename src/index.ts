@@ -2,7 +2,9 @@
 
 import { PythonCompiler } from './compiler';
 import * as fs from 'fs';
-import * as path from 'path';
+
+// 导出公共 API
+export { PythonCompiler };
 
 function main() {
   const args = process.argv.slice(2);
