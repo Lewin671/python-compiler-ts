@@ -1273,9 +1273,26 @@ export class VirtualMachine {
       }
       if (Array.isArray(obj)) {
         if (index && index.type === ASTNodeType.SLICE) {
-          const start = index.start !== null ? index.start : 0;
-          const end = index.end !== null ? index.end : obj.length;
-          obj.splice(start, end - start, ...value);
+          const start = index.start !== null ? index.start : null;
+          const end = index.end !== null ? index.end : null;
+          const step = index.step !== null ? index.step : null;
+          const stepValue = step !== null && step !== undefined ? step : 1;
+          const values = this.toIterableArray(value);
+          if (stepValue === 1) {
+            const bounds = this.computeSliceBounds(obj.length, start, end, stepValue);
+            obj.splice(bounds.start, bounds.end - bounds.start, ...values);
+          } else {
+            const indices = this.computeSliceIndices(obj.length, start, end, stepValue);
+            if (values.length !== indices.length) {
+              throw new PyException(
+                'ValueError',
+                `attempt to assign sequence of size ${values.length} to extended slice of size ${indices.length}`
+              );
+            }
+            for (let i = 0; i < indices.length; i++) {
+              obj[indices[i]] = values[i];
+            }
+          }
         } else {
           obj[index] = value;
         }
@@ -1342,9 +1359,20 @@ export class VirtualMachine {
       }
       if (Array.isArray(obj)) {
         if (index && index.type === ASTNodeType.SLICE) {
-          const start = index.start !== null ? index.start : 0;
-          const end = index.end !== null ? index.end : obj.length;
-          obj.splice(start, end - start);
+          const start = index.start !== null ? index.start : null;
+          const end = index.end !== null ? index.end : null;
+          const step = index.step !== null ? index.step : null;
+          const stepValue = step !== null && step !== undefined ? step : 1;
+          if (stepValue === 1) {
+            const bounds = this.computeSliceBounds(obj.length, start, end, stepValue);
+            obj.splice(bounds.start, bounds.end - bounds.start);
+          } else {
+            const indices = this.computeSliceIndices(obj.length, start, end, stepValue);
+            indices.sort((a, b) => b - a);
+            for (const idx of indices) {
+              obj.splice(idx, 1);
+            }
+          }
         } else {
           obj.splice(index, 1);
         }
@@ -1892,20 +1920,12 @@ export class VirtualMachine {
 
   private getSubscript(obj: any, index: any): any {
     if (index && index.type === ASTNodeType.SLICE) {
-      const length = obj.length;
-      const startProvided = index.start !== null && index.start !== undefined;
-      const endProvided = index.end !== null && index.end !== undefined;
-      let start = startProvided ? index.start : null;
-      let end = endProvided ? index.end : null;
+      const start = index.start !== null && index.start !== undefined ? index.start : null;
+      const end = index.end !== null && index.end !== undefined ? index.end : null;
       const step = index.step !== null && index.step !== undefined ? index.step : 1;
-      if (start === null) start = step < 0 ? length - 1 : 0;
-      if (end === null) end = step < 0 ? -1 : length;
-      if (startProvided && start < 0) start = length + start;
-      if (endProvided && end < 0) end = length + end;
+      const indices = this.computeSliceIndices(obj.length, start, end, step);
       const result: any[] = [];
-      for (let i = start; step > 0 ? i < end : i > end; i += step) {
-        result.push(obj[i]);
-      }
+      for (const idx of indices) result.push(obj[idx]);
       if (typeof obj === 'string') return result.join('');
       if (Array.isArray(obj) && (obj as any).__tuple__) {
         (result as any).__tuple__ = true;
@@ -1926,6 +1946,36 @@ export class VirtualMachine {
       return obj.get(index);
     }
     return null;
+  }
+
+  private computeSliceBounds(length: number, start: any, end: any, step: any) {
+    const stepValue = this.normalizeSliceStep(step);
+    const startProvided = start !== null && start !== undefined;
+    const endProvided = end !== null && end !== undefined;
+    let startValue = startProvided ? toNumber(start) : null;
+    let endValue = endProvided ? toNumber(end) : null;
+    if (startValue === null) startValue = stepValue < 0 ? length - 1 : 0;
+    if (endValue === null) endValue = stepValue < 0 ? -1 : length;
+    if (startProvided && startValue < 0) startValue = length + startValue;
+    if (endProvided && endValue < 0) endValue = length + endValue;
+    return { start: startValue, end: endValue, step: stepValue };
+  }
+
+  private computeSliceIndices(length: number, start: any, end: any, step: any) {
+    const bounds = this.computeSliceBounds(length, start, end, step);
+    const indices: number[] = [];
+    for (let i = bounds.start; bounds.step > 0 ? i < bounds.end : i > bounds.end; i += bounds.step) {
+      indices.push(i);
+    }
+    return indices;
+  }
+
+  private normalizeSliceStep(step: any) {
+    const stepValue = step !== null && step !== undefined ? toNumber(step) : 1;
+    if (stepValue === 0) {
+      throw new PyException('ValueError', 'slice step cannot be zero');
+    }
+    return stepValue;
   }
 
   private getAttribute(obj: any, name: string, scope: Scope): any {
