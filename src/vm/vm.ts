@@ -295,19 +295,6 @@ class PyFile {
   }
 }
 
-const isTruthy = (value: any): boolean => {
-  if (value === null || value === undefined) return false;
-  if (value instanceof Number) return value.valueOf() !== 0;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value === 'bigint') return value !== 0n;
-  if (typeof value === 'string') return value.length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (value instanceof PyDict) return value.size > 0;
-  if (value instanceof Set) return value.size > 0;
-  return true;
-};
-
 const isPyNone = (value: any) => value === null;
 
 const isBigInt = (value: any): value is bigint => typeof value === 'bigint';
@@ -495,6 +482,39 @@ export class VirtualMachine {
     return this.executeBlock(bytecode.ast.body, globalScope);
   }
 
+  private isTruthy(value: any, scope: Scope): boolean {
+    if (value === null || value === undefined) return false;
+    if (value instanceof Number) return value.valueOf() !== 0;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'bigint') return value !== 0n;
+    if (typeof value === 'string') return value.length > 0;
+    if (Array.isArray(value)) return value.length > 0;
+    if (value instanceof PyDict) return value.size > 0;
+    if (value instanceof Set) return value.size > 0;
+    if (value instanceof PyInstance) {
+      const boolAttr = this.findClassAttribute(value.klass, '__bool__');
+      if (boolAttr !== undefined) {
+        const bound = this.getAttribute(value, '__bool__', scope);
+        const result = typeof bound === 'function' ? bound() : bound;
+        if (typeof result !== 'boolean') {
+          throw new PyException('TypeError', '__bool__ should return bool');
+        }
+        return result;
+      }
+      const lenAttr = this.findClassAttribute(value.klass, '__len__');
+      if (lenAttr !== undefined) {
+        const bound = this.getAttribute(value, '__len__', scope);
+        const result = typeof bound === 'function' ? bound() : bound;
+        if (!isNumericLike(result)) {
+          throw new PyException('TypeError', '__len__ should return int');
+        }
+        return toNumber(result) !== 0;
+      }
+    }
+    return true;
+  }
+
   private installBuiltins(scope: Scope) {
     const builtins = new Map<string, any>();
     builtins.set('print', (...args: any[]) => {
@@ -645,7 +665,7 @@ export class VirtualMachine {
     const strFn = (value: any) => pyStr(value);
     (strFn as any).__typeName__ = 'str';
     builtins.set('str', strFn);
-    const boolFn = (value: any) => isTruthy(value);
+    const boolFn = (value: any) => this.isTruthy(value, scope);
     (boolFn as any).__typeName__ = 'bool';
     builtins.set('bool', boolFn);
     builtins.set('type', (value: any) => ({ __typeName__: pyTypeName(value) }));
@@ -691,7 +711,7 @@ export class VirtualMachine {
     });
     builtins.set('filter', (fn: any, iterable: any) => {
       const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
-      return arr.filter((value) => isTruthy(this.callFunction(fn, [value], scope)));
+      return arr.filter((value) => this.isTruthy(this.callFunction(fn, [value], scope), scope));
     });
     builtins.set('next', (iterable: any) => {
       if (iterable instanceof PyGenerator) {
@@ -879,7 +899,7 @@ export class VirtualMachine {
         const test = this.expressionHasYield(node.test)
           ? yield* this.evaluateExpressionGenerator(node.test, scope)
           : this.evaluateExpression(node.test, scope);
-        if (isTruthy(test)) {
+        if (this.isTruthy(test, scope)) {
           yield* this.executeBlockGenerator(node.body, scope);
           return null;
         }
@@ -887,7 +907,7 @@ export class VirtualMachine {
           const branchTest = this.expressionHasYield(branch.test)
             ? yield* this.evaluateExpressionGenerator(branch.test, scope)
             : this.evaluateExpression(branch.test, scope);
-          if (isTruthy(branchTest)) {
+          if (this.isTruthy(branchTest, scope)) {
             yield* this.executeBlockGenerator(branch.body, scope);
             return null;
           }
@@ -902,7 +922,7 @@ export class VirtualMachine {
           const test = this.expressionHasYield(node.test)
             ? yield* this.evaluateExpressionGenerator(node.test, scope)
             : this.evaluateExpression(node.test, scope);
-          if (!isTruthy(test)) break;
+          if (!this.isTruthy(test, scope)) break;
           try {
             yield* this.executeBlockGenerator(node.body, scope);
           } catch (err) {
@@ -943,7 +963,7 @@ export class VirtualMachine {
             const guardValue = this.expressionHasYield(matchCase.guard)
               ? yield* this.evaluateExpressionGenerator(matchCase.guard, guardScope)
               : this.evaluateExpression(matchCase.guard, guardScope);
-            if (!isTruthy(guardValue)) continue;
+            if (!this.isTruthy(guardValue, scope)) continue;
           }
           this.applyBindings(result.bindings, scope);
           yield* this.executeBlockGenerator(matchCase.body, scope);
@@ -1024,7 +1044,7 @@ export class VirtualMachine {
       }
       case ASTNodeType.IF_EXPRESSION: {
         const test = yield* this.evaluateExpressionGenerator(node.test, scope);
-        return isTruthy(test)
+        return this.isTruthy(test, scope)
           ? yield* this.evaluateExpressionGenerator(node.consequent, scope)
           : yield* this.evaluateExpressionGenerator(node.alternate, scope);
       }
@@ -1060,11 +1080,11 @@ export class VirtualMachine {
         return null;
       }
       case ASTNodeType.IF_STATEMENT: {
-        if (isTruthy(this.evaluateExpression(node.test, scope))) {
+        if (this.isTruthy(this.evaluateExpression(node.test, scope), scope)) {
           return this.executeBlock(node.body, scope);
         }
         for (const branch of node.elifs) {
-          if (isTruthy(this.evaluateExpression(branch.test, scope))) {
+          if (this.isTruthy(this.evaluateExpression(branch.test, scope), scope)) {
             return this.executeBlock(branch.body, scope);
           }
         }
@@ -1074,7 +1094,7 @@ export class VirtualMachine {
         return null;
       }
       case ASTNodeType.WHILE_STATEMENT: {
-        while (isTruthy(this.evaluateExpression(node.test, scope))) {
+        while (this.isTruthy(this.evaluateExpression(node.test, scope), scope)) {
           try {
             this.executeBlock(node.body, scope);
           } catch (err) {
@@ -1108,7 +1128,7 @@ export class VirtualMachine {
           if (matchCase.guard) {
             const guardScope = new Scope(scope);
             this.applyBindings(result.bindings, guardScope);
-            if (!isTruthy(this.evaluateExpression(matchCase.guard, guardScope))) continue;
+            if (!this.isTruthy(this.evaluateExpression(matchCase.guard, guardScope), guardScope)) continue;
           }
           this.applyBindings(result.bindings, scope);
           return this.executeBlock(matchCase.body, scope);
@@ -1162,7 +1182,7 @@ export class VirtualMachine {
         return null;
       case ASTNodeType.ASSERT_STATEMENT: {
         const test = this.evaluateExpression(node.test, scope);
-        if (!isTruthy(test)) {
+        if (!this.isTruthy(test, scope)) {
           const message = node.message ? this.evaluateExpression(node.message, scope) : 'Assertion failed';
           throw new PyException('AssertionError', String(message));
         }
@@ -1480,7 +1500,7 @@ export class VirtualMachine {
         const operand = this.evaluateExpression(node.operand, scope);
         switch (node.operator) {
           case 'not':
-            return !isTruthy(operand);
+            return !this.isTruthy(operand, scope);
           case '+':
             return typeof operand === 'bigint' ? operand : +operand;
           case '-':
@@ -1500,10 +1520,10 @@ export class VirtualMachine {
       case ASTNodeType.BOOL_OPERATION: {
         if (node.operator === 'and') {
           const left = this.evaluateExpression(node.values[0], scope);
-          return isTruthy(left) ? this.evaluateExpression(node.values[1], scope) : left;
+          return this.isTruthy(left, scope) ? this.evaluateExpression(node.values[1], scope) : left;
         }
         const left = this.evaluateExpression(node.values[0], scope);
-        return isTruthy(left) ? left : this.evaluateExpression(node.values[1], scope);
+        return this.isTruthy(left, scope) ? left : this.evaluateExpression(node.values[1], scope);
       }
       case ASTNodeType.COMPARE: {
         let left = this.evaluateExpression(node.left, scope);
@@ -1633,7 +1653,7 @@ export class VirtualMachine {
       }
       case ASTNodeType.IF_EXPRESSION: {
         const test = this.evaluateExpression(node.test, scope);
-        return isTruthy(test)
+        return this.isTruthy(test, scope)
           ? this.evaluateExpression(node.consequent, scope)
           : this.evaluateExpression(node.alternate, scope);
       }
@@ -2218,7 +2238,7 @@ export class VirtualMachine {
       const items = Array.isArray(iterable) ? iterable : Array.from(iterable);
       for (const item of items) {
         this.assignTarget(clause.target, item, scope);
-        const passes = clause.ifs.every((cond: any) => isTruthy(this.evaluateExpression(cond, scope)));
+        const passes = clause.ifs.every((cond: any) => this.isTruthy(this.evaluateExpression(cond, scope), scope));
         if (passes) {
           walk(index + 1);
         }
@@ -2241,7 +2261,7 @@ export class VirtualMachine {
         const items = Array.isArray(iterable) ? iterable : Array.from(iterable);
         for (const item of items) {
           self.assignTarget(clause.target, item, scope);
-          const passes = clause.ifs.every((cond: any) => isTruthy(self.evaluateExpression(cond, scope)));
+          const passes = clause.ifs.every((cond: any) => self.isTruthy(self.evaluateExpression(cond, scope), scope));
           if (passes) {
             yield* walk(index + 1);
           }
