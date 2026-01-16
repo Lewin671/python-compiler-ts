@@ -9,11 +9,12 @@ const { spawnSync } = require("child_process");
 function parseArgs(argv) {
   const args = {
     maxIter: 5,
+    testPromptPath: "prompts/test.txt",
     promptPath: "prompts/task.txt",
     commitPromptPath: "prompts/commit.txt",
+    testCmd: "codex --dangerously-bypass-approvals-and-sandbox exec",
     taskCmd: "codex --dangerously-bypass-approvals-and-sandbox exec",
     commitCmd: "codex --dangerously-bypass-approvals-and-sandbox exec",
-    testCmd: "npm test",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -21,8 +22,14 @@ function parseArgs(argv) {
     if (arg === "--max-iter") {
       args.maxIter = Number(argv[i + 1]);
       i += 1;
+    } else if (arg === "--test-prompt") {
+      args.testPromptPath = argv[i + 1];
+      i += 1;
     } else if (arg === "--prompt") {
       args.promptPath = argv[i + 1];
+      i += 1;
+    } else if (arg === "--test-cmd") {
+      args.testCmd = argv[i + 1];
       i += 1;
     } else if (arg === "--task-cmd") {
       args.taskCmd = argv[i + 1];
@@ -32,9 +39,6 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === "--commit-cmd") {
       args.commitCmd = argv[i + 1];
-      i += 1;
-    } else if (arg === "--test-cmd") {
-      args.testCmd = argv[i + 1];
       i += 1;
     } else if (arg === "--help" || arg === "-h") {
       return { help: true };
@@ -50,13 +54,14 @@ function usage() {
     "",
     "Options:",
     "  --max-iter <n>      Max iterations (default 5)",
-    "  --prompt <path>     Prompt file path (default prompts/task.txt)",
-    "  --task-cmd <cmd>    Codex task command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
+    "  --test-prompt <path>     Test prompt file path (default prompts/test.txt)",
+    "  --test-cmd <cmd>    Test command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
+    "  --prompt <path>     Task prompt file path (default prompts/task.txt)",
+    "  --task-cmd <cmd>    Task command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
     "  --commit-prompt <path>  Commit prompt file (default prompts/commit.txt)",
-    "  --commit-cmd <cmd>  Codex commit command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
-    "  --test-cmd <cmd>    Test command (default \"npm test\")",
+    "  --commit-cmd <cmd>  Commit command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
     "",
-    "Note: .git directory path and -C option are automatically added to commit command",
+    "Workflow: Test Agent -> Task Agent -> Commit Agent",
   ].join("\n");
 }
 
@@ -80,6 +85,49 @@ function readPrompt(promptPath) {
 function buildPrompt(base, testOutput) {
   if (!testOutput) return base;
   return `${base}\n\n[Test failures]\n${testOutput}`;
+}
+
+function runTest(testCmd, testPromptPath, log, errorLog) {
+  log("=== PHASE: Test (Generate test cases & find issues) ===");
+  const testPrompt = readPrompt(testPromptPath);
+  const testStatus = runShell(testCmd, { input: testPrompt });
+  
+  if (testStatus !== 0) {
+    errorLog(`✗ Test agent failed (exit ${testStatus}).`);
+    return false;
+  }
+  
+  log("✓ Test agent completed - issues identified.");
+  return true;
+}
+
+function runTask(taskCmd, taskPromptPath, testOutput, log, errorLog) {
+  log("=== PHASE: Task ===");
+  const basePrompt = readPrompt(taskPromptPath);
+  const combinedPrompt = buildPrompt(basePrompt, testOutput);
+  const taskStatus = runShell(taskCmd, { input: combinedPrompt });
+  
+  if (taskStatus !== 0) {
+    errorLog(`✗ Task command failed (exit ${taskStatus}).`);
+    return false;
+  }
+  
+  log("✓ Task completed successfully.");
+  return true;
+}
+
+function runCommit(commitCmd, commitPromptPath, gitDir, cwd, log, errorLog) {
+  log("=== PHASE: Commit ===");
+  const commitPrompt = readPrompt(path.resolve(commitPromptPath));
+  const commitStatus = runShell(commitCmd, { input: commitPrompt });
+  
+  if (commitStatus !== 0) {
+    errorLog(`✗ Commit command failed (exit ${commitStatus}).`);
+    return false;
+  }
+  
+  log("✓ Commit completed successfully.");
+  return true;
 }
 
 function main() {
@@ -115,44 +163,51 @@ function main() {
   };
 
   for (let i = 1; i <= args.maxIter; i += 1) {
-    log(`\n=== Iteration ${i}/${args.maxIter} ===`);
-    const basePrompt = readPrompt(promptPath);
-    const combinedPrompt = buildPrompt(basePrompt, lastTestOutput);
-    // const taskStatus = runShell(args.taskCmd, { input: combinedPrompt });
-    // if (taskStatus !== 0) {
-    //   errorLog(`Task command failed (exit ${taskStatus}).`);
-    //   process.exit(taskStatus);
-    // }
+    log(`\n========== Iteration ${i}/${args.maxIter} ==========`);
 
-    const commitPrompt = readPrompt(path.resolve(args.commitPromptPath));
-    // Build commit command with absolute path to .git and current working directory
-    const commitCmdFull = `${args.commitCmd.replace(" exec", "")} --add-dir "${gitDir}" -C "${cwd}" exec`;
-    log(`Running commit command: ${commitCmdFull}`);
-    const commitStatus = runShell(commitCmdFull, { input: commitPrompt });
-    if (commitStatus !== 0) {
-      errorLog(`Commit command failed (exit ${commitStatus}).`);
-      process.exit(commitStatus);
+    // STEP 1: Test (AI Agent generates test cases and identifies issues)
+    const testSuccess = runTest(
+      args.testCmd,
+      path.resolve(args.testPromptPath),
+      log,
+      errorLog
+    );
+    if (!testSuccess) {
+      errorLog("Test agent execution failed. Exiting.");
+      process.exit(1);
     }
 
-    const testResult = spawnSync(args.testCmd, {
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const stdout = testResult.stdout ? testResult.stdout.toString() : "";
-    const stderr = testResult.stderr ? testResult.stderr.toString() : "";
-    const testOutput = `${stdout}${stderr}`.trim();
-
-    if ((testResult.status ?? 1) === 0) {
-      log("Tests passed.");
-      log(`Log file: ${logFile}`);
-      process.exit(0);
+    // STEP 2: Task (AI Agent fixes issues)
+    const taskSuccess = runTask(
+      args.taskCmd,
+      promptPath,
+      "",
+      log,
+      errorLog
+    );
+    if (!taskSuccess) {
+      errorLog("Task execution failed. Exiting.");
+      process.exit(1);
     }
 
-    lastTestOutput = testOutput || "Tests failed with no output.";
-    log("Tests failed; continuing to next iteration.");
+    // STEP 3: Commit
+    const commitSuccess = runCommit(
+      args.commitCmd,
+      path.resolve(args.commitPromptPath),
+      gitDir,
+      cwd,
+      log,
+      errorLog
+    );
+    if (!commitSuccess) {
+      errorLog("Commit execution failed. Exiting.");
+      process.exit(1);
+    }
+
+    log(`Iteration ${i} completed. Restarting test phase...\n`);
   }
 
-  errorLog("Reached max iterations without passing tests.");
+  errorLog("Reached max iterations without completion.");
   errorLog(`Log file: ${logFile}`);
   process.exit(1);
 }
