@@ -1,0 +1,237 @@
+import type { VirtualMachine } from './vm';
+import { PyClass, PyDict, PyException, PyFile, PyGenerator, Scope } from './runtime-types';
+import { isFloatLike, isNumericLike, pyStr, pyTypeName, toBigIntValue, toNumber } from './value-utils';
+
+export function installBuiltins(this: VirtualMachine, scope: Scope) {
+  const builtins = new Map<string, any>();
+  builtins.set('print', (...args: any[]) => {
+    let sep = ' ';
+    let end = '\n';
+    if (args.length > 0) {
+      const last = args[args.length - 1];
+      if (last && last.__kwargs__) {
+        const kwargs = last.__kwargs__;
+        sep = kwargs.sep !== undefined ? kwargs.sep : sep;
+        end = kwargs.end !== undefined ? kwargs.end : end;
+        args = args.slice(0, -1);
+      }
+    }
+    const output = args.map((a) => pyStr(a)).join(sep) + end;
+    process.stdout.write(output);
+    return null;
+  });
+  builtins.set('len', (value: any) => {
+    if (typeof value === 'string' || Array.isArray(value)) return value.length;
+    if (value instanceof PyDict || value instanceof Set) return value.size;
+    throw new PyException('TypeError', 'object has no len()');
+  });
+  builtins.set('range', (...args: any[]) => {
+    let start = 0;
+    let end = 0;
+    let step = 1;
+    if (args.length === 1) {
+      end = toNumber(args[0]);
+    } else if (args.length === 2) {
+      start = toNumber(args[0]);
+      end = toNumber(args[1]);
+    } else if (args.length >= 3) {
+      start = toNumber(args[0]);
+      end = toNumber(args[1]);
+      step = toNumber(args[2]);
+    }
+    const result: number[] = [];
+    if (step === 0) throw new PyException('ValueError', 'range() arg 3 must not be zero');
+    if (step > 0) {
+      for (let i = start; i < end; i += step) result.push(i);
+    } else {
+      for (let i = start; i > end; i += step) result.push(i);
+    }
+    return result;
+  });
+  const listFn = (value: any) => {
+    if (Array.isArray(value)) return [...value];
+    if (value instanceof Set) return Array.from(value.values());
+    if (value && typeof value[Symbol.iterator] === 'function') return Array.from(value);
+    return [];
+  };
+  (listFn as any).__typeName__ = 'list';
+  builtins.set('list', listFn);
+  const tupleFn = (value: any) => {
+    const arr = Array.isArray(value) ? [...value] : value && typeof value[Symbol.iterator] === 'function' ? Array.from(value) : [];
+    (arr as any).__tuple__ = true;
+    return arr;
+  };
+  (tupleFn as any).__typeName__ = 'tuple';
+  builtins.set('tuple', tupleFn);
+  const setFn = (value: any) => {
+    if (value instanceof Set) return new Set(value);
+    if (Array.isArray(value)) return new Set(value);
+    if (value && typeof value[Symbol.iterator] === 'function') return new Set(Array.from(value));
+    return new Set();
+  };
+  (setFn as any).__typeName__ = 'set';
+  builtins.set('set', setFn);
+  builtins.set('sum', (value: any[]) => {
+    if (value.some((v) => typeof v === 'bigint')) {
+      return value.reduce((acc, v) => acc + toBigIntValue(v), 0n);
+    }
+    return value.reduce((acc, v) => acc + v, 0);
+  });
+  builtins.set('max', (...args: any[]) => {
+    const values = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+    if (values.every((v: any) => isNumericLike(v) && !isFloatLike(v))) {
+      return values.reduce((acc: any, v: any) => (toBigIntValue(v) > toBigIntValue(acc) ? v : acc));
+    }
+    return Math.max(...values.map((v: any) => toNumber(v)));
+  });
+  builtins.set('min', (...args: any[]) => {
+    const values = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+    if (values.every((v: any) => isNumericLike(v) && !isFloatLike(v))) {
+      return values.reduce((acc: any, v: any) => (toBigIntValue(v) < toBigIntValue(acc) ? v : acc));
+    }
+    return Math.min(...values.map((v: any) => toNumber(v)));
+  });
+  builtins.set('abs', (value: any) => {
+    if (typeof value === 'bigint') return value < 0n ? -value : value;
+    return Math.abs(toNumber(value));
+  });
+  const roundHalfToEven = (input: number) => {
+    const floored = Math.floor(input);
+    const diff = input - floored;
+    const epsilon = 1e-12;
+    if (diff > 0.5 + epsilon) return floored + 1;
+    if (diff < 0.5 - epsilon) return floored;
+    return floored % 2 === 0 ? floored : floored + 1;
+  };
+  builtins.set('round', (value: number, digits?: number) => {
+    if (digits === undefined) return roundHalfToEven(value);
+    const factor = Math.pow(10, digits);
+    return roundHalfToEven(value * factor) / factor;
+  });
+  const intFn = (value: any) => {
+    if (typeof value === 'bigint') return value;
+    const text = typeof value === 'string' ? value.trim() : null;
+    if (text && /^[-+]?\\d+$/.test(text)) {
+      const big = BigInt(text);
+      const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+      const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+      if (big > maxSafe || big < minSafe) {
+        return big;
+      }
+    }
+    const result = parseInt(value, 10);
+    if (Number.isNaN(result)) throw new PyException('ValueError', 'Invalid integer');
+    const boxed = new Number(result);
+    (boxed as any).__int__ = true;
+    return boxed;
+  };
+  (intFn as any).__typeName__ = 'int';
+  builtins.set('int', intFn);
+  const floatFn = (value?: any) => {
+    if (value === undefined) return new Number(0);
+    if (value instanceof Number) return new Number(value.valueOf());
+    if (typeof value === 'number') return new Number(value);
+    if (typeof value === 'boolean') return new Number(value ? 1 : 0);
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (text.length === 0) throw new PyException('ValueError', 'Invalid float');
+      const lower = text.toLowerCase();
+      if (lower === 'nan' || lower === '+nan' || lower === '-nan') return new Number(NaN);
+      if (lower === 'inf' || lower === '+inf' || lower === 'infinity' || lower === '+infinity') return new Number(Infinity);
+      if (lower === '-inf' || lower === '-infinity') return new Number(-Infinity);
+      const result = parseFloat(text);
+      if (Number.isNaN(result)) throw new PyException('ValueError', 'Invalid float');
+      return new Number(result);
+    }
+    const result = parseFloat(value);
+    if (Number.isNaN(result)) throw new PyException('ValueError', 'Invalid float');
+    return new Number(result);
+  };
+  (floatFn as any).__typeName__ = 'float';
+  builtins.set('float', floatFn);
+  const strFn = (value: any) => pyStr(value);
+  (strFn as any).__typeName__ = 'str';
+  builtins.set('str', strFn);
+  const boolFn = (value: any) => this.isTruthy(value, scope);
+  (boolFn as any).__typeName__ = 'bool';
+  builtins.set('bool', boolFn);
+  builtins.set('type', (value: any) => ({ __typeName__: pyTypeName(value) }));
+  builtins.set('isinstance', (value: any, typeObj: any) => {
+    if (typeObj && typeObj.__typeName__) {
+      return pyTypeName(value) === typeObj.__typeName__;
+    }
+    return false;
+  });
+  builtins.set('enumerate', (iterable: any) => {
+    const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+    return arr.map((v, i) => {
+      const tup = [i, v];
+      (tup as any).__tuple__ = true;
+      return tup;
+    });
+  });
+  builtins.set('zip', (...iterables: any[]) => {
+    const arrays = iterables.map((it) => (Array.isArray(it) ? it : Array.from(it)));
+    const length = Math.min(...arrays.map((a) => a.length));
+    const result: any[] = [];
+    for (let i = 0; i < length; i++) {
+      const tup = arrays.map((a) => a[i]);
+      (tup as any).__tuple__ = true;
+      result.push(tup);
+    }
+    return result;
+  });
+  builtins.set('sorted', (iterable: any) => {
+    const arr = Array.isArray(iterable) ? [...iterable] : Array.from(iterable);
+    if (arr.every((v) => isNumericLike(v))) {
+      return arr.sort((a, b) => toNumber(a) - toNumber(b));
+    }
+    return arr.sort();
+  });
+  builtins.set('reversed', (iterable: any) => {
+    const arr = Array.isArray(iterable) ? [...iterable] : Array.from(iterable);
+    return arr.reverse();
+  });
+  builtins.set('map', (fn: any, iterable: any) => {
+    const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+    return arr.map((value) => this.callFunction(fn, [value], scope));
+  });
+  builtins.set('filter', (fn: any, iterable: any) => {
+    const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+    return arr.filter((value) => this.isTruthy(this.callFunction(fn, [value], scope), scope));
+  });
+  builtins.set('next', (iterable: any) => {
+    if (iterable instanceof PyGenerator) {
+      return iterable.next();
+    }
+    if (iterable && typeof iterable.next === 'function') {
+      const result = iterable.next();
+      if (result.done) throw new PyException('StopIteration', 'StopIteration');
+      return result.value;
+    }
+    throw new PyException('TypeError', 'object is not an iterator');
+  });
+  builtins.set('open', (path: any, mode: any = 'r') => {
+    const file = new PyFile(String(path), String(mode));
+    try {
+      file.open();
+    } catch (err) {
+      throw new PyException('FileNotFoundError', 'File not found');
+    }
+    return file;
+  });
+  const exceptionClass = (name: string, base?: PyClass) => {
+    const klass = new PyClass(name, base ? [base] : [], new Map(), true);
+    return klass;
+  };
+
+  const ExceptionBase = exceptionClass('Exception');
+  builtins.set('Exception', ExceptionBase);
+  builtins.set('AssertionError', exceptionClass('AssertionError', ExceptionBase));
+  builtins.set('ZeroDivisionError', exceptionClass('ZeroDivisionError', ExceptionBase));
+  builtins.set('ValueError', exceptionClass('ValueError', ExceptionBase));
+  builtins.set('TypeError', exceptionClass('TypeError', ExceptionBase));
+  builtins.set('FileNotFoundError', exceptionClass('FileNotFoundError', ExceptionBase));
+
+  scope.values = new Map([...builtins.entries()]);
+}
