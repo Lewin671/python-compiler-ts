@@ -830,14 +830,57 @@ export class Parser {
       return { type: ASTNodeType.MATCH_STATEMENT, subject, cases };
     };
 
+    const parseImportStatement = (): ASTNode => {
+      expect(TokenType.KEYWORD, 'import');
+      const names: Array<{ name: string; alias: string | null }> = [];
+      const parseName = () => {
+        let name = expect(TokenType.IDENTIFIER).value;
+        while (match(TokenType.DOT)) {
+          consume();
+          name += `.${expect(TokenType.IDENTIFIER).value}`;
+        }
+        let alias: string | null = null;
+        if (match(TokenType.KEYWORD, 'as')) {
+          consume();
+          alias = expect(TokenType.IDENTIFIER).value;
+        }
+        names.push({ name, alias });
+      };
+      parseName();
+      while (match(TokenType.COMMA)) {
+        consume();
+        parseName();
+      }
+      return { type: ASTNodeType.IMPORT_STATEMENT, names };
+    };
+
     const parseStatement = (): ASTNode => {
       skipNewlines();
       if (match(TokenType.AT)) {
         const decorators = parseDecorators();
+        if (match(TokenType.KEYWORD, 'async')) {
+          consume();
+          if (!match(TokenType.KEYWORD, 'def')) {
+            throw new Error('async must be followed by def');
+          }
+          const node = parseFunctionDef(decorators);
+          (node as any).isAsync = true;
+          return node;
+        }
         if (match(TokenType.KEYWORD, 'def')) return parseFunctionDef(decorators);
         if (match(TokenType.KEYWORD, 'class')) return parseClassDef(decorators);
         throw new Error('Decorator must be followed by def or class');
       }
+      if (match(TokenType.KEYWORD, 'async')) {
+        consume();
+        if (!match(TokenType.KEYWORD, 'def')) {
+          throw new Error('async must be followed by def');
+        }
+        const node = parseFunctionDef();
+        (node as any).isAsync = true;
+        return node;
+      }
+      if (match(TokenType.KEYWORD, 'import')) return parseImportStatement();
       if (match(TokenType.KEYWORD, 'def')) return parseFunctionDef();
       if (match(TokenType.KEYWORD, 'class')) return parseClassDef();
       if (match(TokenType.KEYWORD, 'if')) return parseIfStatement();

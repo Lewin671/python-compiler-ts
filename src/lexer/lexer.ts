@@ -204,7 +204,8 @@ export class Lexer {
             ident === 'pass' || ident === 'in' || ident === 'is' || ident === 'and' || ident === 'or' || ident === 'not' ||
             ident === 'lambda' || ident === 'yield' || ident === 'try' || ident === 'except' || ident === 'finally' ||
             ident === 'with' || ident === 'as' || ident === 'global' || ident === 'nonlocal' || ident === 'assert' ||
-            ident === 'raise' || ident === 'del' || ident === 'match' || ident === 'case') {
+            ident === 'raise' || ident === 'del' || ident === 'match' || ident === 'case' || ident === 'import' ||
+            ident === 'async') {
           this.tokens.push(createToken(TokenType.KEYWORD, ident));
         } else if (ident === 'True' || ident === 'False') {
           this.tokens.push(createToken(TokenType.BOOLEAN, ident));

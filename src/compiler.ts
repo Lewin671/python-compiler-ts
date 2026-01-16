@@ -7,6 +7,7 @@ import { Lexer } from './lexer';
 import { Parser } from './parser';
 import { Compiler } from './compiler_module';
 import { VirtualMachine } from './vm';
+import * as path from 'path';
 
 export class PythonCompiler {
   /**
@@ -28,7 +29,7 @@ export class PythonCompiler {
     const bytecode = compiler.compile(ast);
 
     // 4. 执行字节码
-    const vm = new VirtualMachine();
+    const vm = new VirtualMachine([process.cwd()]);
     const result = vm.execute(bytecode);
 
     return result;
@@ -42,7 +43,14 @@ export class PythonCompiler {
   runFile(filePath: string): any {
     const fs = require('fs');
     const code = fs.readFileSync(filePath, 'utf-8');
-    return this.run(code);
+    const lexer = new Lexer(code);
+    const tokens = lexer.tokenize();
+    const parser = new Parser(tokens);
+    const ast = parser.parse();
+    const compiler = new Compiler();
+    const bytecode = compiler.compile(ast);
+    const vm = new VirtualMachine([path.dirname(filePath), process.cwd()]);
+    return vm.execute(bytecode);
   }
 }
 

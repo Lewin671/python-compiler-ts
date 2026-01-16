@@ -19,6 +19,7 @@ export enum ASTNodeType {
   BREAK_STATEMENT = 'BreakStatement',
   CONTINUE_STATEMENT = 'ContinueStatement',
   PASS_STATEMENT = 'PassStatement',
+  IMPORT_STATEMENT = 'ImportStatement',
   CLASS_DEF = 'ClassDef',
   TRY_STATEMENT = 'TryStatement',
   WITH_STATEMENT = 'WithStatement',

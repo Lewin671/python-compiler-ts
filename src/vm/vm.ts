@@ -2,6 +2,7 @@ import { ByteCode, ASTNodeType } from '../types';
 import { Lexer } from '../lexer';
 import { Parser } from '../parser';
 import * as fs from 'fs';
+import * as path from 'path';
 
 type ScopeValue = any;
 
@@ -417,6 +418,13 @@ const parseStringToken = (tokenValue: string): { value: string; isFString: boole
  * 虚拟机 - 执行 AST
  */
 export class VirtualMachine {
+  private moduleCache: Map<string, any> = new Map();
+  private moduleSearchPaths: string[];
+
+  constructor(moduleSearchPaths: string[] = [process.cwd()]) {
+    this.moduleSearchPaths = moduleSearchPaths;
+  }
+
   execute(bytecode: ByteCode): any {
     if (!bytecode.ast) {
       throw new Error('Bytecode missing AST');
@@ -621,6 +629,62 @@ export class VirtualMachine {
     builtins.set('FileNotFoundError', exceptionClass('FileNotFoundError', ExceptionBase));
 
     scope.values = new Map([...builtins.entries()]);
+  }
+
+  private importModule(name: string, scope: Scope): any {
+    if (this.moduleCache.has(name)) {
+      return this.moduleCache.get(name);
+    }
+    let module: any;
+    if (name === 'asyncio') {
+      module = this.createAsyncioModule(scope);
+    } else {
+      module = this.loadModuleFromFile(name, scope);
+    }
+    this.moduleCache.set(name, module);
+    return module;
+  }
+
+  private createAsyncioModule(scope: Scope): any {
+    this.importModule('math', scope);
+    return {
+      __name__: 'asyncio',
+      run: (value: any) => {
+        if (value instanceof PyFunction) {
+          return this.callFunction(value, [], scope);
+        }
+        if (value instanceof PyGenerator) {
+          return value.next();
+        }
+        return value;
+      }
+    };
+  }
+
+  private loadModuleFromFile(name: string, scope: Scope): any {
+    const modulePath = this.resolveModulePath(name);
+    if (!modulePath) {
+      throw new PyException('ImportError', `No module named '${name}'`);
+    }
+    const code = fs.readFileSync(modulePath, 'utf-8');
+    const lexer = new Lexer(code);
+    const tokens = lexer.tokenize();
+    const parser = new Parser(tokens);
+    const ast = parser.parse();
+    const moduleScope = new Scope(scope.root());
+    moduleScope.set('__name__', name);
+    this.executeBlock(ast.body, moduleScope);
+    return { __name__: name, __moduleScope__: moduleScope };
+  }
+
+  private resolveModulePath(name: string): string | null {
+    for (const basePath of this.moduleSearchPaths) {
+      const directPath = path.join(basePath, `${name}.py`);
+      if (fs.existsSync(directPath)) return directPath;
+      const initPath = path.join(basePath, name, '__init__.py');
+      if (fs.existsSync(initPath)) return initPath;
+    }
+    return null;
   }
 
   private executeBlock(body: any[], scope: Scope): any {
@@ -880,6 +944,14 @@ export class VirtualMachine {
     switch (node.type) {
       case ASTNodeType.EXPRESSION_STATEMENT:
         return this.evaluateExpression(node.expression, scope);
+      case ASTNodeType.IMPORT_STATEMENT: {
+        for (const entry of node.names) {
+          const module = this.importModule(entry.name, scope);
+          const bindingName = entry.alias || entry.name.split('.')[0];
+          scope.set(bindingName, module);
+        }
+        return null;
+      }
       case ASTNodeType.ASSIGNMENT: {
         const value = this.evaluateExpression(node.value, scope);
         for (const target of node.targets) {
@@ -1690,6 +1762,11 @@ export class VirtualMachine {
   }
 
   private getAttribute(obj: any, name: string, scope: Scope): any {
+    if (obj && obj.__moduleScope__) {
+      if (obj.__moduleScope__.values.has(name)) {
+        return obj.__moduleScope__.values.get(name);
+      }
+    }
     if (obj instanceof PyInstance) {
       if (obj.attributes.has(name)) return obj.attributes.get(name);
       const attr = this.findClassAttribute(obj.klass, name);
@@ -1776,6 +1853,10 @@ export class VirtualMachine {
   }
 
   private setAttribute(obj: any, name: string, value: any) {
+    if (obj && obj.__moduleScope__) {
+      obj.__moduleScope__.values.set(name, value);
+      return;
+    }
     if (obj instanceof PyInstance) {
       obj.attributes.set(name, value);
       return;
