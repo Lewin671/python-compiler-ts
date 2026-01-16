@@ -508,10 +508,18 @@ export class VirtualMachine {
     builtins.set('max', (...args: any[]) => args.length === 1 && Array.isArray(args[0]) ? Math.max(...args[0]) : Math.max(...args));
     builtins.set('min', (...args: any[]) => args.length === 1 && Array.isArray(args[0]) ? Math.min(...args[0]) : Math.min(...args));
     builtins.set('abs', (value: any) => Math.abs(value));
+    const roundHalfToEven = (input: number) => {
+      const floored = Math.floor(input);
+      const diff = input - floored;
+      const epsilon = 1e-12;
+      if (diff > 0.5 + epsilon) return floored + 1;
+      if (diff < 0.5 - epsilon) return floored;
+      return floored % 2 === 0 ? floored : floored + 1;
+    };
     builtins.set('round', (value: number, digits?: number) => {
-      if (digits === undefined) return Math.round(value);
+      if (digits === undefined) return roundHalfToEven(value);
       const factor = Math.pow(10, digits);
-      return Math.round(value * factor) / factor;
+      return roundHalfToEven(value * factor) / factor;
     });
     const intFn = (value: any) => {
       const result = parseInt(value, 10);
