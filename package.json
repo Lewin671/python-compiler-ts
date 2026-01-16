@@ -1,5 +1,5 @@
 {
-  "name": "python-compiler-ts",
+  "name": "@lewin671/python-vm",
   "version": "0.1.0",
   "description": "A Python compiler and interpreter implemented in TypeScript",
   "main": "dist/index.js",

@@ -1,4 +1,4 @@
-# python-compiler-ts
+# @lewin671/python-vm
 
 一个使用 TypeScript 实现的 Python 编译器与解释器。目前编译器会将 AST 打包到字节码容器中，由虚拟机执行。
 
@@ -62,10 +62,10 @@ node dist/index.js examples/hello.py
 
 ### 在 TypeScript 中调用
 
-运行 `npm run build` 后，可以在 TypeScript 中这样调用。作为依赖使用时请从 `python-compiler-ts` 导入，本仓库本地开发时则从 `./dist` 导入。
+运行 `npm run build` 后，可以在 TypeScript 中这样调用。作为依赖使用时请从 `@lewin671/python-vm` 导入，本仓库本地开发时则从 `./dist` 导入。
 
 ```ts
-import { PythonCompiler } from 'python-compiler-ts';
+import { PythonCompiler } from '@lewin671/python-vm';
 
 const compiler = new PythonCompiler();
 const result = compiler.run('print("Hello from TypeScript")');
@@ -76,7 +76,7 @@ console.log(result);
 ## 项目结构
 
 ```
-python-compiler-ts/
+@lewin671/python-vm/
 ├── dist/                # 编译输出
 ├── examples/            # 测试用 Python 示例
 ├── src/

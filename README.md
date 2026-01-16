@@ -1,4 +1,4 @@
-# python-compiler-ts
+# @lewin671/python-vm
 
 A Python compiler and interpreter implemented in TypeScript. The compiler currently packages the AST into a bytecode container that the VM executes.
 
@@ -62,10 +62,10 @@ node dist/index.js examples/hello.py
 
 ### Use in TypeScript
 
-After `npm run build`, you can call the compiler from TypeScript. When consuming the package, import from `python-compiler-ts`. For local development in this repo, import from `./dist` instead.
+After `npm run build`, you can call the compiler from TypeScript. When consuming the package, import from `@lewin671/python-vm`. For local development in this repo, import from `./dist` instead.
 
 ```ts
-import { PythonCompiler } from 'python-compiler-ts';
+import { PythonCompiler } from '@lewin671/python-vm';
 
 const compiler = new PythonCompiler();
 const result = compiler.run('print("Hello from TypeScript")');
@@ -76,7 +76,7 @@ console.log(result);
 ## Project Structure
 
 ```
-python-compiler-ts/
+@lewin671/python-vm/
 ├── dist/                # Compiled output
 ├── examples/            # Sample Python programs used by tests
 ├── src/
