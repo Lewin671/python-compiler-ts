@@ -20,7 +20,6 @@ export function importModule(this: VirtualMachine, name: string, scope: Scope): 
 }
 
 export function createAsyncioModule(this: VirtualMachine, scope: Scope): any {
-  this.importModule('math', scope);
   return {
     __name__: 'asyncio',
     run: (value: any) => {

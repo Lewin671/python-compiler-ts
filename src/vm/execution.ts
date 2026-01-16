@@ -47,8 +47,34 @@ export function matchValueEquals(left: any, right: any): boolean {
   return left === right;
 }
 
-export function matchPattern(node: any, value: any, scope: Scope): { matched: boolean; bindings: Map<string, any> } {
+export function matchPattern(this: VirtualMachine, node: any, value: any, scope: Scope): { matched: boolean; bindings: Map<string, any> } {
   switch (node.type) {
+    case ASTNodeType.MATCH_PATTERN_VALUE:
+      return { matched: matchValueEquals(value, this.evaluateExpression(node.value, scope)), bindings: new Map() };
+    case ASTNodeType.MATCH_PATTERN_WILDCARD:
+      return { matched: true, bindings: new Map() };
+    case ASTNodeType.MATCH_PATTERN_CAPTURE:
+      return { matched: true, bindings: new Map([[node.name, value]]) };
+    case ASTNodeType.MATCH_PATTERN_OR: {
+      for (const pattern of node.patterns || []) {
+        const result = this.matchPattern(pattern, value, scope);
+        if (result.matched) return result;
+      }
+      return { matched: false, bindings: new Map() };
+    }
+    case ASTNodeType.MATCH_PATTERN_SEQUENCE: {
+      const elements = node.elements || node.patterns;
+      if (!Array.isArray(value) || !elements || elements.length !== value.length) {
+        return { matched: false, bindings: new Map() };
+      }
+      const bindings = new Map<string, any>();
+      for (let i = 0; i < elements.length; i++) {
+        const result = this.matchPattern(elements[i], value[i], scope);
+        if (!result.matched) return { matched: false, bindings: new Map() };
+        for (const [k, v] of result.bindings.entries()) bindings.set(k, v);
+      }
+      return { matched: true, bindings };
+    }
     case 'MatchValue':
       return { matched: matchValueEquals(value, node.value), bindings: new Map() };
     case 'MatchSingleton':
@@ -58,7 +84,7 @@ export function matchPattern(node: any, value: any, scope: Scope): { matched: bo
       if (!node.patterns || node.patterns.length !== value.length) return { matched: false, bindings: new Map() };
       const bindings = new Map<string, any>();
       for (let i = 0; i < node.patterns.length; i++) {
-        const result = matchPattern(node.patterns[i], value[i], scope);
+        const result = this.matchPattern(node.patterns[i], value[i], scope);
         if (!result.matched) return { matched: false, bindings: new Map() };
         for (const [k, v] of result.bindings.entries()) bindings.set(k, v);
       }
@@ -69,7 +95,7 @@ export function matchPattern(node: any, value: any, scope: Scope): { matched: bo
       const bindings = new Map<string, any>();
       for (const { key, pattern } of node.keys) {
         if (!value.has(key)) return { matched: false, bindings: new Map() };
-        const result = matchPattern(pattern, value.get(key), scope);
+        const result = this.matchPattern(pattern, value.get(key), scope);
         if (!result.matched) return { matched: false, bindings: new Map() };
         for (const [k, v] of result.bindings.entries()) bindings.set(k, v);
       }
@@ -86,7 +112,7 @@ export function matchPattern(node: any, value: any, scope: Scope): { matched: bo
       for (let i = 0; i < node.patterns.length; i++) {
         const attrName = node.kwd_attrs[i] || node.patterns[i].name;
         const attrValue = value.attributes.get(attrName);
-        const result = matchPattern(node.patterns[i], attrValue, scope);
+        const result = this.matchPattern(node.patterns[i], attrValue, scope);
         if (!result.matched) return { matched: false, bindings: new Map() };
         for (const [k, v] of result.bindings.entries()) bindings.set(k, v);
       }
