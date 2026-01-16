@@ -12,6 +12,7 @@ Hard constraints:
 - Keep changes focused and minimal; avoid unrelated refactors.
 - Prefer TypeScript changes in `src/` as needed.
 - If you add new files, keep them small and well-scoped.
+- Refactor the file proactively if it's too long to maintain.
 
 Process:
 - Inspect failures and determine the minimal fix.
