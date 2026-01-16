@@ -316,10 +316,16 @@ const isFloatObject = (value: any): boolean => value instanceof Number && !isInt
 const isFloatLike = (value: any): boolean =>
   isFloatObject(value) || (typeof value === 'number' && !Number.isInteger(value));
 const isIntLike = (value: any): boolean =>
-  isBigInt(value) || (typeof value === 'number' && Number.isInteger(value)) || isIntObject(value);
-const isNumericLike = (value: any): boolean => isBigInt(value) || typeof value === 'number' || value instanceof Number;
+  isBigInt(value) ||
+  value === true ||
+  value === false ||
+  (typeof value === 'number' && Number.isInteger(value)) ||
+  isIntObject(value);
+const isNumericLike = (value: any): boolean =>
+  isBigInt(value) || typeof value === 'number' || value instanceof Number || typeof value === 'boolean';
 const toNumber = (value: any): number => {
   if (value instanceof Number) return value.valueOf();
+  if (typeof value === 'boolean') return value ? 1 : 0;
   if (typeof value === 'bigint') return Number(value);
   return value;
 };
