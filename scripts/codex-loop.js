@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { spawnSync } = require("child_process");
 
 function parseArgs(argv) {
@@ -10,8 +11,8 @@ function parseArgs(argv) {
     maxIter: 5,
     promptPath: "prompts/task.txt",
     commitPromptPath: "prompts/commit.txt",
-    taskCmd: "codex -a never --sandbox workspace-write exec",
-    commitCmd: "codex -a never --sandbox workspace-write --add-dir .git exec",
+    taskCmd: "codex --dangerously-bypass-approvals-and-sandbox exec",
+    commitCmd: "codex --dangerously-bypass-approvals-and-sandbox exec",
     testCmd: "npm test",
   };
 
@@ -50,10 +51,12 @@ function usage() {
     "Options:",
     "  --max-iter <n>      Max iterations (default 5)",
     "  --prompt <path>     Prompt file path (default prompts/task.txt)",
-    "  --task-cmd <cmd>    Codex task command (default \"codex -a never --sandbox workspace-write exec\")",
+    "  --task-cmd <cmd>    Codex task command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
     "  --commit-prompt <path>  Commit prompt file (default prompts/commit.txt)",
-    "  --commit-cmd <cmd>  Codex commit command (default \"codex -a never --sandbox workspace-write --add-dir .git exec\")",
+    "  --commit-cmd <cmd>  Codex commit command (default \"codex --dangerously-bypass-approvals-and-sandbox exec\")",
     "  --test-cmd <cmd>    Test command (default \"npm test\")",
+    "",
+    "Note: .git directory path and -C option are automatically added to commit command",
   ].join("\n");
 }
 
@@ -92,21 +95,42 @@ function main() {
 
   let lastTestOutput = "";
   const promptPath = path.resolve(args.promptPath);
+  const cwd = process.cwd();
+  const gitDir = path.resolve(cwd, ".git");
+
+  // Initialize logging
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[:.]/g, "-").slice(0, -5);
+  const logFile = path.join(os.tmpdir(), `codex-loop-${dateStr}.log`);
+
+  console.log(`Logging to ${logFile}`);
+  const log = (message) => {
+    console.log(message);
+    fs.appendFileSync(logFile, `${message}\n`, "utf8");
+  };
+
+  const errorLog = (message) => {
+    console.error(message);
+    fs.appendFileSync(logFile, `[ERROR] ${message}\n`, "utf8");
+  };
 
   for (let i = 1; i <= args.maxIter; i += 1) {
-    console.log(`\n=== Iteration ${i}/${args.maxIter} ===`);
+    log(`\n=== Iteration ${i}/${args.maxIter} ===`);
     const basePrompt = readPrompt(promptPath);
     const combinedPrompt = buildPrompt(basePrompt, lastTestOutput);
-    const taskStatus = runShell(args.taskCmd, { input: combinedPrompt });
-    if (taskStatus !== 0) {
-      console.error(`Task command failed (exit ${taskStatus}).`);
-      process.exit(taskStatus);
-    }
+    // const taskStatus = runShell(args.taskCmd, { input: combinedPrompt });
+    // if (taskStatus !== 0) {
+    //   errorLog(`Task command failed (exit ${taskStatus}).`);
+    //   process.exit(taskStatus);
+    // }
 
     const commitPrompt = readPrompt(path.resolve(args.commitPromptPath));
-    const commitStatus = runShell(args.commitCmd, { input: commitPrompt });
+    // Build commit command with absolute path to .git and current working directory
+    const commitCmdFull = `${args.commitCmd.replace(" exec", "")} --add-dir "${gitDir}" -C "${cwd}" exec`;
+    log(`Running commit command: ${commitCmdFull}`);
+    const commitStatus = runShell(commitCmdFull, { input: commitPrompt });
     if (commitStatus !== 0) {
-      console.error(`Commit command failed (exit ${commitStatus}).`);
+      errorLog(`Commit command failed (exit ${commitStatus}).`);
       process.exit(commitStatus);
     }
 
@@ -119,15 +143,17 @@ function main() {
     const testOutput = `${stdout}${stderr}`.trim();
 
     if ((testResult.status ?? 1) === 0) {
-      console.log("Tests passed.");
+      log("Tests passed.");
+      log(`Log file: ${logFile}`);
       process.exit(0);
     }
 
     lastTestOutput = testOutput || "Tests failed with no output.";
-    console.log("Tests failed; continuing to next iteration.");
+    log("Tests failed; continuing to next iteration.");
   }
 
-  console.error("Reached max iterations without passing tests.");
+  errorLog("Reached max iterations without passing tests.");
+  errorLog(`Log file: ${logFile}`);
   process.exit(1);
 }
 
