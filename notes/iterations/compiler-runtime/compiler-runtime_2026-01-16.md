@@ -1,4 +1,4 @@
-# compiler-runtime: float('nan') rejected
+# compiler-runtime: Starred assignment unpacking
 
 - Date: 2026-01-16
 - Stage: test
@@ -6,21 +6,19 @@
 
 ## Problem / Symptom
 
-TypeScript VM throws ValueError "Invalid float" when running code that calls float('nan').
+Tests failed parsing assignment targets with starred unpacking (e.g., `a, *middle, b = values`) and raised "Unexpected token in expression: *".
 
 ## Impact / Risk
 
-Valid Python code using NaN literals or float('nan') cannot run; downstream semantics like NaN set behavior cannot be tested.
+Example files using starred unpacking could not be parsed or executed, blocking `scripts/verify.sh`.
 
 ## Current Understanding
 
-The runtime uses parseFloat and treats NaN as invalid, diverging from CPython which accepts float('nan').
+Parser did not allow `*` in assignment targets and VM assignment logic only handled fixed-length tuple/list destructuring. Added a STARRED AST node for targets, parsed it in assignment targets, and implemented unpacking logic in the VM with iterable normalization.
 
 ## Next Steps
 
-- Done: float() now accepts nan/inf tokens, handles no-arg calls, and comparisons respect NaN semantics.
-- Optional: add a regression example that exercises NaN equality and set behavior.
+None. Re-run verify if adding more starred assignment cases.
 
 ## Evidence (optional)
-- Tests: ./scripts/verify.sh (fails on examples/nan_set.py)
- - Tests: ./scripts/verify.sh (passes)
+- Tests: `scripts/verify.sh`

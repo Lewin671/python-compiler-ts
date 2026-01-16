@@ -1016,13 +1016,41 @@ export class VirtualMachine {
     }
     if (target.type === ASTNodeType.TUPLE_LITERAL || target.type === ASTNodeType.LIST_LITERAL) {
       const elements = target.elements;
-      if (!Array.isArray(value)) throw new PyException('TypeError', 'cannot unpack non-iterable');
-      for (let i = 0; i < elements.length; i++) {
-        this.assignTarget(elements[i], value[i], scope);
+      const unpackValue = this.toIterableArray(value);
+      const starIndex = elements.findIndex((el: any) => el.type === ASTNodeType.STARRED);
+      if (starIndex === -1) {
+        for (let i = 0; i < elements.length; i++) {
+          this.assignTarget(elements[i], unpackValue[i], scope);
+        }
+        return;
+      }
+      const prefixCount = starIndex;
+      const suffixCount = elements.length - starIndex - 1;
+      if (unpackValue.length < prefixCount + suffixCount) {
+        throw new PyException('ValueError', 'not enough values to unpack');
+      }
+      for (let i = 0; i < prefixCount; i++) {
+        this.assignTarget(elements[i], unpackValue[i], scope);
+      }
+      const starTarget = elements[starIndex];
+      const middle = unpackValue.slice(prefixCount, unpackValue.length - suffixCount);
+      this.assignTarget(starTarget.target, middle, scope);
+      for (let i = 0; i < suffixCount; i++) {
+        const valueIndex = unpackValue.length - suffixCount + i;
+        const elementIndex = starIndex + 1 + i;
+        this.assignTarget(elements[elementIndex], unpackValue[valueIndex], scope);
       }
       return;
     }
     throw new PyException('TypeError', 'invalid assignment target');
+  }
+
+  private toIterableArray(value: any): any[] {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value[Symbol.iterator] === 'function') {
+      return Array.from(value);
+    }
+    throw new PyException('TypeError', 'cannot unpack non-iterable');
   }
 
   private deleteTarget(target: any, scope: Scope) {

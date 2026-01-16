@@ -342,14 +342,23 @@ export class Parser {
       return expr;
     };
 
+    const parseTargetElement = (): ASTNode => {
+      if (match(TokenType.OPERATOR, '*')) {
+        consume();
+        const target = parsePostfixTarget();
+        return { type: ASTNodeType.STARRED, target };
+      }
+      return parsePostfixTarget();
+    };
+
     const parseTarget = (): ASTNode => {
-      const first = parsePostfixTarget();
+      const first = parseTargetElement();
       if (match(TokenType.COMMA)) {
         const elements: ASTNode[] = [first];
         while (match(TokenType.COMMA)) {
           consume();
           if (match(TokenType.NEWLINE) || match(TokenType.COLON)) break;
-          elements.push(parsePostfixTarget());
+          elements.push(parseTargetElement());
         }
         return { type: ASTNodeType.TUPLE_LITERAL, elements };
       }

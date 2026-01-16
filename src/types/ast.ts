@@ -52,4 +52,5 @@ export enum ASTNodeType {
   SET_COMP = 'SetComp',
   GENERATOR_EXPR = 'GeneratorExpr',
   YIELD = 'Yield',
+  STARRED = 'Starred',
 }
