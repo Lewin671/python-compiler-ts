@@ -233,8 +233,9 @@ class PyDict {
     return { store: this.objectStore, id: key };
   }
 
-  private normalizeNumericKey(key: any): number | null {
+  private normalizeNumericKey(key: any): number | bigint | null {
     if (typeof key === 'boolean') return key ? 1 : 0;
+    if (typeof key === 'bigint') return key;
     if (typeof key === 'number') return key;
     if (key instanceof Number) return key.valueOf();
     return null;
@@ -299,6 +300,7 @@ const isTruthy = (value: any): boolean => {
   if (value instanceof Number) return value.valueOf() !== 0;
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'bigint') return value !== 0n;
   if (typeof value === 'string') return value.length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (value instanceof PyDict) return value.size > 0;
@@ -308,14 +310,55 @@ const isTruthy = (value: any): boolean => {
 
 const isPyNone = (value: any) => value === null;
 
+const isBigInt = (value: any): value is bigint => typeof value === 'bigint';
 const isIntObject = (value: any): boolean => value instanceof Number && (value as any).__int__ === true;
 const isFloatObject = (value: any): boolean => value instanceof Number && !isIntObject(value);
-const isIntLike = (value: any): boolean => typeof value === 'number' || isIntObject(value);
-const isNumericLike = (value: any): boolean => typeof value === 'number' || value instanceof Number;
-const numValue = (value: any) => (value instanceof Number ? value.valueOf() : value);
+const isFloatLike = (value: any): boolean =>
+  isFloatObject(value) || (typeof value === 'number' && !Number.isInteger(value));
+const isIntLike = (value: any): boolean =>
+  isBigInt(value) || (typeof value === 'number' && Number.isInteger(value)) || isIntObject(value);
+const isNumericLike = (value: any): boolean => isBigInt(value) || typeof value === 'number' || value instanceof Number;
+const toNumber = (value: any): number => {
+  if (value instanceof Number) return value.valueOf();
+  if (typeof value === 'bigint') return Number(value);
+  return value;
+};
+const toBigIntValue = (value: any): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (value instanceof Number) return BigInt(Math.trunc(value.valueOf()));
+  if (typeof value === 'number') return BigInt(value);
+  return BigInt(value);
+};
+const shouldUseBigInt = (left: any, right: any): boolean =>
+  (isBigInt(left) || isBigInt(right)) && !isFloatLike(left) && !isFloatLike(right);
+const numericEquals = (left: any, right: any): boolean => {
+  if (isNumericLike(left) && isNumericLike(right)) {
+    if (isFloatLike(left) || isFloatLike(right)) {
+      const leftNum = toNumber(left);
+      const rightNum = toNumber(right);
+      return !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum === rightNum;
+    }
+    return toBigIntValue(left) === toBigIntValue(right);
+  }
+  return left === right;
+};
+const numericCompare = (left: any, right: any): { kind: 'float' | 'int'; left: number | bigint; right: number | bigint } | null => {
+  if (!isNumericLike(left) || !isNumericLike(right)) return null;
+  if (isFloatLike(left) || isFloatLike(right)) {
+    return { kind: 'float', left: toNumber(left), right: toNumber(right) };
+  }
+  return { kind: 'int', left: toBigIntValue(left), right: toBigIntValue(right) };
+};
+const bigIntFloorDiv = (left: bigint, right: bigint): bigint => {
+  const quotient = left / right;
+  if (left % right === 0n) return quotient;
+  if ((left < 0n) !== (right < 0n)) return quotient - 1n;
+  return quotient;
+};
 
 const pyTypeName = (value: any): string => {
   if (value === null) return 'NoneType';
+  if (isBigInt(value)) return 'int';
   if (isIntObject(value)) return 'int';
   if (value instanceof Number) return 'float';
   if (typeof value === 'boolean') return 'bool';
@@ -342,6 +385,7 @@ const pyRepr = (value: any): string => {
   }
   if (typeof value === 'boolean') return value ? 'True' : 'False';
   if (typeof value === 'number') return Number.isNaN(value) ? 'nan' : String(value);
+  if (typeof value === 'bigint') return value.toString();
   if (value && value.__complex__) {
     const sign = value.im >= 0 ? '+' : '-';
     const imag = Math.abs(value.im);
@@ -382,13 +426,22 @@ const isComplex = (value: any) => value && value.__complex__;
 
 const toComplex = (value: any) => {
   if (isComplex(value)) return value;
-  if (isNumericLike(value)) return { __complex__: true, re: numValue(value), im: 0 };
+  if (isNumericLike(value)) return { __complex__: true, re: toNumber(value), im: 0 };
   return { __complex__: true, re: 0, im: 0 };
 };
 
 const pythonModulo = (left: any, right: any) => {
-  const leftNum = numValue(left);
-  const rightNum = numValue(right);
+  if (shouldUseBigInt(left, right)) {
+    const leftNum = toBigIntValue(left);
+    const rightNum = toBigIntValue(right);
+    if (rightNum === 0n) throw new PyException('ZeroDivisionError', 'division by zero');
+    const remainder = leftNum % rightNum;
+    const adjust = remainder !== 0n && (leftNum < 0n) !== (rightNum < 0n);
+    const quotient = leftNum / rightNum - (adjust ? 1n : 0n);
+    return leftNum - quotient * rightNum;
+  }
+  const leftNum = toNumber(left);
+  const rightNum = toNumber(right);
   if (rightNum === 0) throw new PyException('ZeroDivisionError', 'division by zero');
   const quotient = Math.floor(leftNum / rightNum);
   const result = leftNum - quotient * rightNum;
@@ -463,14 +516,14 @@ export class VirtualMachine {
       let end = 0;
       let step = 1;
       if (args.length === 1) {
-        end = args[0];
+        end = toNumber(args[0]);
       } else if (args.length === 2) {
-        start = args[0];
-        end = args[1];
+        start = toNumber(args[0]);
+        end = toNumber(args[1]);
       } else if (args.length >= 3) {
-        start = args[0];
-        end = args[1];
-        step = args[2];
+        start = toNumber(args[0]);
+        end = toNumber(args[1]);
+        step = toNumber(args[2]);
       }
       const result: number[] = [];
       if (step === 0) throw new PyException('ValueError', 'range() arg 3 must not be zero');
@@ -504,10 +557,30 @@ export class VirtualMachine {
     };
     (setFn as any).__typeName__ = 'set';
     builtins.set('set', setFn);
-    builtins.set('sum', (value: any[]) => value.reduce((acc, v) => acc + v, 0));
-    builtins.set('max', (...args: any[]) => args.length === 1 && Array.isArray(args[0]) ? Math.max(...args[0]) : Math.max(...args));
-    builtins.set('min', (...args: any[]) => args.length === 1 && Array.isArray(args[0]) ? Math.min(...args[0]) : Math.min(...args));
-    builtins.set('abs', (value: any) => Math.abs(value));
+    builtins.set('sum', (value: any[]) => {
+      if (value.some((v) => typeof v === 'bigint')) {
+        return value.reduce((acc, v) => acc + toBigIntValue(v), 0n);
+      }
+      return value.reduce((acc, v) => acc + v, 0);
+    });
+    builtins.set('max', (...args: any[]) => {
+      const values = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+      if (values.every((v: any) => isNumericLike(v) && !isFloatLike(v))) {
+        return values.reduce((acc: any, v: any) => (toBigIntValue(v) > toBigIntValue(acc) ? v : acc));
+      }
+      return Math.max(...values.map((v: any) => toNumber(v)));
+    });
+    builtins.set('min', (...args: any[]) => {
+      const values = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
+      if (values.every((v: any) => isNumericLike(v) && !isFloatLike(v))) {
+        return values.reduce((acc: any, v: any) => (toBigIntValue(v) < toBigIntValue(acc) ? v : acc));
+      }
+      return Math.min(...values.map((v: any) => toNumber(v)));
+    });
+    builtins.set('abs', (value: any) => {
+      if (typeof value === 'bigint') return value < 0n ? -value : value;
+      return Math.abs(toNumber(value));
+    });
     const roundHalfToEven = (input: number) => {
       const floored = Math.floor(input);
       const diff = input - floored;
@@ -522,6 +595,16 @@ export class VirtualMachine {
       return roundHalfToEven(value * factor) / factor;
     });
     const intFn = (value: any) => {
+      if (typeof value === 'bigint') return value;
+      const text = typeof value === 'string' ? value.trim() : null;
+      if (text && /^[-+]?\d+$/.test(text)) {
+        const big = BigInt(text);
+        const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+        const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+        if (big > maxSafe || big < minSafe) {
+          return big;
+        }
+      }
       const result = parseInt(value, 10);
       if (Number.isNaN(result)) throw new PyException('ValueError', 'Invalid integer');
       const boxed = new Number(result);
@@ -587,7 +670,7 @@ export class VirtualMachine {
     builtins.set('sorted', (iterable: any) => {
       const arr = Array.isArray(iterable) ? [...iterable] : Array.from(iterable);
       if (arr.every((v) => isNumericLike(v))) {
-        return arr.sort((a, b) => numValue(a) - numValue(b));
+        return arr.sort((a, b) => toNumber(a) - toNumber(b));
       }
       return arr.sort();
     });
@@ -712,12 +795,7 @@ export class VirtualMachine {
   }
 
   private matchValueEquals(left: any, right: any): boolean {
-    const leftNum = left instanceof Number ? left.valueOf() : typeof left === 'number' ? left : null;
-    const rightNum = right instanceof Number ? right.valueOf() : typeof right === 'number' ? right : null;
-    if (leftNum !== null && rightNum !== null) {
-      return !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum === rightNum;
-    }
-    return left === right;
+    return numericEquals(left, right);
   }
 
   private matchPattern(node: any, value: any, scope: Scope): { matched: boolean; bindings: Map<string, any> } {
@@ -1284,7 +1362,11 @@ export class VirtualMachine {
           return { __complex__: true, re: 0, im: imag };
         }
         if (raw.includes('.')) return new Number(parseFloat(raw));
-        return parseInt(raw, 10);
+        const big = BigInt(raw);
+        const maxSafe = BigInt(Number.MAX_SAFE_INTEGER);
+        const minSafe = BigInt(Number.MIN_SAFE_INTEGER);
+        if (big > maxSafe || big < minSafe) return big;
+        return Number(raw);
       }
       case ASTNodeType.STRING_LITERAL: {
         const { value, isFString } = parseStringToken(node.value);
@@ -1365,7 +1447,7 @@ export class VirtualMachine {
           case 'not':
             return !isTruthy(operand);
           case '+':
-            return +operand;
+            return typeof operand === 'bigint' ? operand : +operand;
           case '-':
             return -operand;
           case '~':
@@ -1388,49 +1470,67 @@ export class VirtualMachine {
           const op = node.ops[i];
           const right = this.evaluateExpression(node.comparators[i], scope);
           let result = false;
-          const leftNum = left instanceof Number ? left.valueOf() : typeof left === 'number' ? left : null;
-          const rightNum = right instanceof Number ? right.valueOf() : typeof right === 'number' ? right : null;
           switch (op) {
             case '==':
-              if (leftNum !== null && rightNum !== null) {
-                result = !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum === rightNum;
-              } else {
-                result = left === right;
-              }
+              result = numericEquals(left, right);
               break;
             case '!=':
-              if (leftNum !== null && rightNum !== null) {
-                result = Number.isNaN(leftNum) || Number.isNaN(rightNum) || leftNum !== rightNum;
-              } else {
-                result = left !== right;
-              }
+              result = !numericEquals(left, right);
               break;
             case '<':
-              if (leftNum !== null && rightNum !== null) {
-                result = !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum < rightNum;
-              } else {
-                result = left < right;
+              {
+                const numeric = numericCompare(left, right);
+                if (numeric) {
+                  if (numeric.kind === 'float') {
+                    result = !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) < (numeric.right as number);
+                  } else {
+                    result = (numeric.left as bigint) < (numeric.right as bigint);
+                  }
+                } else {
+                  result = left < right;
+                }
               }
               break;
             case '>':
-              if (leftNum !== null && rightNum !== null) {
-                result = !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum > rightNum;
-              } else {
-                result = left > right;
+              {
+                const numeric = numericCompare(left, right);
+                if (numeric) {
+                  if (numeric.kind === 'float') {
+                    result = !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) > (numeric.right as number);
+                  } else {
+                    result = (numeric.left as bigint) > (numeric.right as bigint);
+                  }
+                } else {
+                  result = left > right;
+                }
               }
               break;
             case '<=':
-              if (leftNum !== null && rightNum !== null) {
-                result = !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum <= rightNum;
-              } else {
-                result = left <= right;
+              {
+                const numeric = numericCompare(left, right);
+                if (numeric) {
+                  if (numeric.kind === 'float') {
+                    result = !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) <= (numeric.right as number);
+                  } else {
+                    result = (numeric.left as bigint) <= (numeric.right as bigint);
+                  }
+                } else {
+                  result = left <= right;
+                }
               }
               break;
             case '>=':
-              if (leftNum !== null && rightNum !== null) {
-                result = !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum >= rightNum;
-              } else {
-                result = left >= right;
+              {
+                const numeric = numericCompare(left, right);
+                if (numeric) {
+                  if (numeric.kind === 'float') {
+                    result = !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) >= (numeric.right as number);
+                  } else {
+                    result = (numeric.left as bigint) >= (numeric.right as bigint);
+                  }
+                } else {
+                  result = left >= right;
+                }
               }
               break;
             case 'in':
@@ -1530,21 +1630,21 @@ export class VirtualMachine {
     if (!spec) return pyStr(value);
     if (spec.endsWith('%')) {
       const digits = spec.includes('.') ? parseInt(spec.split('.')[1], 10) : 0;
-      const num = isNumericLike(value) ? numValue(value) : parseFloat(value);
+      const num = isNumericLike(value) ? toNumber(value) : parseFloat(value);
       return (num * 100).toFixed(digits) + '%';
     }
     if (spec.includes('.')) {
       const parts = spec.split('.');
       const width = parts[0];
       const precision = parseInt(parts[1].replace(/[^\d]/g, ''), 10);
-      const num = isNumericLike(value) ? numValue(value) : parseFloat(value);
+      const num = isNumericLike(value) ? toNumber(value) : parseFloat(value);
       const formatted = num.toFixed(precision);
       return this.applyWidth(formatted, width);
     }
-    if (spec === 'd') return String(parseInt(value, 10));
-    if (spec === 'b') return Number(value).toString(2);
-    if (spec === 'x') return Number(value).toString(16);
-    if (spec === 'o') return Number(value).toString(8);
+    if (spec === 'd') return typeof value === 'bigint' ? value.toString() : String(parseInt(value, 10));
+    if (spec === 'b') return typeof value === 'bigint' ? value.toString(2) : Number(value).toString(2);
+    if (spec === 'x') return typeof value === 'bigint' ? value.toString(16) : Number(value).toString(16);
+    if (spec === 'o') return typeof value === 'bigint' ? value.toString(8) : Number(value).toString(8);
     return this.applyWidth(String(value), spec);
   }
 
@@ -1580,7 +1680,7 @@ export class VirtualMachine {
   private contains(container: any, value: any): boolean {
     if (Array.isArray(container)) {
       if (isNumericLike(value)) {
-        return container.some((item) => isNumericLike(item) && numValue(item) === numValue(value));
+        return container.some((item) => isNumericLike(item) && numericEquals(item, value));
       }
       return container.includes(value);
     }
@@ -1589,7 +1689,7 @@ export class VirtualMachine {
       if (container.has(value)) return true;
       if (isNumericLike(value)) {
         for (const item of container.values()) {
-          if (isNumericLike(item) && numValue(item) === numValue(value)) return true;
+          if (isNumericLike(item) && numericEquals(item, value)) return true;
         }
       }
       return false;
@@ -1626,8 +1726,11 @@ export class VirtualMachine {
           }
           return result;
         }
-        if (isFloatObject(left) || isFloatObject(right)) {
-          return new Number(numValue(left) + numValue(right));
+        if (isFloatLike(left) || isFloatLike(right)) {
+          return new Number(toNumber(left) + toNumber(right));
+        }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) + toBigIntValue(right);
         }
         return left + right;
       case '-':
@@ -1636,23 +1739,26 @@ export class VirtualMachine {
           for (const item of right.values()) result.delete(item);
           return result;
         }
-        if (isFloatObject(left) || isFloatObject(right)) {
-          return new Number(numValue(left) - numValue(right));
+        if (isFloatLike(left) || isFloatLike(right)) {
+          return new Number(toNumber(left) - toNumber(right));
+        }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) - toBigIntValue(right);
         }
         return left - right;
       case '*':
         if (typeof left === 'string' && isIntLike(right)) {
-          const count = numValue(right);
+          const count = toNumber(right);
           if (count <= 0) return '';
           return left.repeat(count);
         }
         if (typeof right === 'string' && isIntLike(left)) {
-          const count = numValue(left);
+          const count = toNumber(left);
           if (count <= 0) return '';
           return right.repeat(count);
         }
         if (Array.isArray(left) && isIntLike(right)) {
-          const count = numValue(right);
+          const count = toNumber(right);
           if (count <= 0) {
             const result: any[] = [];
             if ((left as any).__tuple__) {
@@ -1666,17 +1772,23 @@ export class VirtualMachine {
           }
           return result;
         }
-        if (isFloatObject(left) || isFloatObject(right)) {
-          return new Number(numValue(left) * numValue(right));
+        if (isFloatLike(left) || isFloatLike(right)) {
+          return new Number(toNumber(left) * toNumber(right));
+        }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) * toBigIntValue(right);
         }
         return left * right;
       case '/':
-        if (right === 0) throw new PyException('ZeroDivisionError', 'division by zero');
-        return new Number(numValue(left) / numValue(right));
+        if (right === 0 || right === 0n) throw new PyException('ZeroDivisionError', 'division by zero');
+        return new Number(toNumber(left) / toNumber(right));
       case '//':
-        if (right === 0) throw new PyException('ZeroDivisionError', 'division by zero');
-        if (isFloatObject(left) || isFloatObject(right)) {
-          return new Number(Math.floor(numValue(left) / numValue(right)));
+        if (right === 0 || right === 0n) throw new PyException('ZeroDivisionError', 'division by zero');
+        if (isFloatLike(left) || isFloatLike(right)) {
+          return new Number(Math.floor(toNumber(left) / toNumber(right)));
+        }
+        if (shouldUseBigInt(left, right)) {
+          return bigIntFloorDiv(toBigIntValue(left), toBigIntValue(right));
         }
         return Math.floor(left / right);
       case '%':
@@ -1685,7 +1797,23 @@ export class VirtualMachine {
         }
         return pythonModulo(left, right);
       case '**':
-        return Math.pow(left, right);
+        if (isIntLike(left) && isIntLike(right) && !isFloatLike(left) && !isFloatLike(right)) {
+          const exponentNum = toNumber(right);
+          if (Number.isInteger(exponentNum) && exponentNum >= 0) {
+            const approx = Math.pow(toNumber(left), exponentNum);
+            if (shouldUseBigInt(left, right) || !Number.isSafeInteger(approx)) {
+              return toBigIntValue(left) ** toBigIntValue(right);
+            }
+          }
+        }
+        if (shouldUseBigInt(left, right)) {
+          const exponent = toBigIntValue(right);
+          if (exponent < 0n) {
+            return new Number(Math.pow(toNumber(left), toNumber(right)));
+          }
+          return toBigIntValue(left) ** exponent;
+        }
+        return Math.pow(toNumber(left), toNumber(right));
       case '&':
         if (left instanceof Set && right instanceof Set) {
           const result = new Set<any>();
@@ -1694,12 +1822,18 @@ export class VirtualMachine {
           }
           return result;
         }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) & toBigIntValue(right);
+        }
         return left & right;
       case '|':
         if (left instanceof Set && right instanceof Set) {
           const result = new Set<any>(left);
           for (const item of right.values()) result.add(item);
           return result;
+        }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) | toBigIntValue(right);
         }
         return left | right;
       case '^':
@@ -1713,10 +1847,19 @@ export class VirtualMachine {
           }
           return result;
         }
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) ^ toBigIntValue(right);
+        }
         return left ^ right;
       case '<<':
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) << toBigIntValue(right);
+        }
         return left << right;
       case '>>':
+        if (shouldUseBigInt(left, right)) {
+          return toBigIntValue(left) >> toBigIntValue(right);
+        }
         return left >> right;
       default:
         throw new PyException('TypeError', `unsupported operator ${op}`);
@@ -1728,7 +1871,7 @@ export class VirtualMachine {
     let index = 0;
     return format.replace(/%[sdfo]/g, (match) => {
       const val = values[index++];
-      if (match === '%d') return String(parseInt(val, 10));
+      if (match === '%d') return typeof val === 'bigint' ? val.toString() : String(parseInt(val, 10));
       if (match === '%f') return String(parseFloat(val));
       return String(val);
     });
@@ -1758,8 +1901,11 @@ export class VirtualMachine {
     }
     if (Array.isArray(obj) || typeof obj === 'string') {
       let idx = index;
-      if (isIntLike(idx) && numValue(idx) < 0) {
-        idx = obj.length + numValue(idx);
+      if (isIntLike(idx) && toNumber(idx) < 0) {
+        idx = obj.length + toNumber(idx);
+      }
+      if (isIntLike(idx)) {
+        idx = toNumber(idx);
       }
       return obj[idx];
     }
