@@ -27,6 +27,7 @@ export class Scope {
   parent: Scope | null;
   globals: Set<string> = new Set();
   nonlocals: Set<string> = new Set();
+  locals: Set<string> = new Set();
   isClassScope: boolean = false;
 
   constructor(parent: Scope | null = null, isClassScope: boolean = false) {
@@ -37,6 +38,9 @@ export class Scope {
   get(name: string): ScopeValue {
     if (this.values.has(name)) {
       return this.values.get(name);
+    }
+    if (this.locals.has(name)) {
+      throw new PyException('UnboundLocalError', `local variable '${name}' referenced before assignment`);
     }
     let p = this.parent;
     while (p && p.isClassScope) {
@@ -95,13 +99,22 @@ export class PyFunction {
   body: any[];
   closure: Scope;
   isGenerator: boolean;
+  localNames: Set<string>;
 
-  constructor(name: string, params: any[], body: any[], closure: Scope, isGenerator: boolean) {
+  constructor(
+    name: string,
+    params: any[],
+    body: any[],
+    closure: Scope,
+    isGenerator: boolean,
+    localNames: Set<string> = new Set()
+  ) {
     this.name = name;
     this.params = params;
     this.body = body;
     this.closure = closure;
     this.isGenerator = isGenerator;
+    this.localNames = localNames;
   }
 }
 

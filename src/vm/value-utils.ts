@@ -189,3 +189,151 @@ export const parseStringToken = (tokenValue: string): { value: string; isFString
     isFString,
   };
 };
+
+import { ASTNodeType } from '../types';
+
+export function findLocalVariables(body: any[]): Set<string> {
+  const locals = new Set<string>();
+  const globals = new Set<string>();
+  const nonlocals = new Set<string>();
+
+  function collect(node: any) {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      for (const item of node) collect(item);
+      return;
+    }
+
+    switch (node.type) {
+      case ASTNodeType.ASSIGNMENT:
+        for (const target of node.targets) collectTarget(target);
+        break;
+      case ASTNodeType.AUG_ASSIGNMENT:
+        collectTarget(node.target);
+        break;
+      case ASTNodeType.FOR_STATEMENT:
+        collectTarget(node.target);
+        collect(node.body);
+        collect(node.orelse);
+        break;
+      case ASTNodeType.WITH_STATEMENT:
+        for (const item of node.items) {
+          if (item.target) collectTarget(item.target);
+        }
+        collect(node.body);
+        break;
+      case ASTNodeType.TRY_STATEMENT:
+        collect(node.body);
+        for (const handler of node.handlers) {
+          if (handler.name) locals.add(handler.name);
+          collect(handler.body);
+        }
+        collect(node.orelse);
+        collect(node.finalbody);
+        break;
+      case ASTNodeType.FUNCTION_DEF:
+        locals.add(node.name);
+        // Do not recurse into nested function body for local variable analysis of current scope
+        break;
+      case ASTNodeType.CLASS_DEF:
+        locals.add(node.name);
+        // Do not recurse into class body
+        break;
+      case ASTNodeType.IMPORT_STATEMENT:
+        for (const entry of node.names) {
+          const bindingName = entry.alias || entry.name.split('.')[0];
+          locals.add(bindingName);
+        }
+        break;
+      case ASTNodeType.GLOBAL_STATEMENT:
+        for (const name of node.names) globals.add(name);
+        break;
+      case ASTNodeType.NONLOCAL_STATEMENT:
+        for (const name of node.names) nonlocals.add(name);
+        break;
+      case ASTNodeType.IF_STATEMENT:
+        collect(node.body);
+        for (const elif of node.elifs) collect(elif.body);
+        collect(node.orelse);
+        break;
+      case ASTNodeType.WHILE_STATEMENT:
+        collect(node.body);
+        collect(node.orelse);
+        break;
+      case ASTNodeType.MATCH_STATEMENT:
+        for (const matchCase of node.cases) {
+          collectPattern(matchCase.pattern);
+          collect(matchCase.body);
+        }
+        break;
+      case ASTNodeType.DELETE_STATEMENT:
+        // delete does not bind, but it can only delete variables in the current scope if they are local
+        break;
+    }
+  }
+
+  function collectTarget(target: any) {
+    if (target.type === ASTNodeType.IDENTIFIER) {
+      locals.add(target.name);
+    } else if (target.type === ASTNodeType.TUPLE_LITERAL || target.type === ASTNodeType.LIST_LITERAL) {
+      for (const element of target.elements) {
+        if (element.type === ASTNodeType.STARRED) {
+          collectTarget(element.target);
+        } else {
+          collectTarget(element);
+        }
+      }
+    }
+  }
+
+  function collectPattern(pattern: any) {
+    if (!pattern) return;
+    switch (pattern.type) {
+      case ASTNodeType.MATCH_PATTERN_CAPTURE:
+        locals.add(pattern.name);
+        break;
+      case ASTNodeType.MATCH_PATTERN_OR:
+        if (pattern.patterns) {
+          for (const p of pattern.patterns) collectPattern(p);
+        }
+        break;
+      case ASTNodeType.MATCH_PATTERN_SEQUENCE: {
+        const elements = pattern.elements || pattern.patterns;
+        if (elements) {
+          for (const p of elements) collectPattern(p);
+        }
+        break;
+      }
+      case 'MatchAs':
+        if (pattern.name) locals.add(pattern.name);
+        if (pattern.pattern) collectPattern(pattern.pattern);
+        break;
+      case 'MatchSequence':
+        if (pattern.patterns) {
+          for (const p of pattern.patterns) collectPattern(p);
+        }
+        break;
+      case 'MatchMapping':
+        if (pattern.patterns) {
+          for (const p of pattern.patterns) collectPattern(p);
+        }
+        if (pattern.keys) {
+          for (const { pattern: p } of pattern.keys) collectPattern(p);
+        }
+        break;
+      case 'MatchClass':
+        if (pattern.patterns) {
+          for (const p of pattern.patterns) collectPattern(p);
+        }
+        break;
+    }
+  }
+
+  collect(body);
+
+  // Remove variables declared global or nonlocal from locals
+  for (const g of globals) locals.delete(g);
+  for (const n of nonlocals) locals.delete(n);
+
+  return locals;
+}

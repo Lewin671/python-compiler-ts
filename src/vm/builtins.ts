@@ -229,7 +229,9 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
   builtins.set('Exception', ExceptionBase);
   builtins.set('AssertionError', exceptionClass('AssertionError', ExceptionBase));
   builtins.set('AttributeError', exceptionClass('AttributeError', ExceptionBase));
-  builtins.set('NameError', exceptionClass('NameError', ExceptionBase));
+  const NameErrorBase = exceptionClass('NameError', ExceptionBase);
+  builtins.set('NameError', NameErrorBase);
+  builtins.set('UnboundLocalError', exceptionClass('UnboundLocalError', NameErrorBase));
   builtins.set('ZeroDivisionError', exceptionClass('ZeroDivisionError', ExceptionBase));
   builtins.set('ValueError', exceptionClass('ValueError', ExceptionBase));
   builtins.set('TypeError', exceptionClass('TypeError', ExceptionBase));

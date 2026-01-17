@@ -2,6 +2,7 @@ import type { VirtualMachine } from './vm';
 import { ASTNodeType } from '../types';
 import { BreakSignal, ContinueSignal, PyClass, PyException, PyFunction, PyInstance, ReturnSignal, Scope } from './runtime-types';
 import { PyDict } from './runtime-types';
+import { findLocalVariables } from './value-utils';
 
 export function executeStatement(this: VirtualMachine, node: any, scope: Scope): any {
   switch (node.type) {
@@ -160,7 +161,12 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
         return param;
       });
       const closure = scope.isClassScope ? (scope.parent as Scope) : scope;
-      const fn = new PyFunction(node.name, params, node.body, closure, this.containsYield(node.body));
+      const localNames = findLocalVariables(node.body);
+      // Parameters are also local
+      for (const p of node.params || []) {
+        if (p.name) localNames.add(p.name);
+      }
+      const fn = new PyFunction(node.name, params, node.body, closure, this.containsYield(node.body), localNames);
       scope.set(node.name, fn);
       if (node.decorators && node.decorators.length > 0) {
         let decorated: any = fn;

@@ -14,6 +14,7 @@ export function callFunction(
   }
   if (func instanceof PyFunction) {
     const callScope = new Scope(func.closure);
+    callScope.locals = new Set(func.localNames);
     for (const param of func.params) {
       if (param.type === 'Param') {
         let argValue: any;
