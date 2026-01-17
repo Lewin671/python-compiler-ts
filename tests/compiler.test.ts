@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { PythonCompiler } from '../src/index';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -36,12 +38,12 @@ const captureOutput = (fn: () => void): string => {
   const outputChunks: string[] = [];
   const originalWrite = process.stdout.write;
 
-  process.stdout.write = ((chunk: any) => {
+  process.stdout.write = ((chunk: string | Buffer) => {
     const normalized =
       typeof chunk === 'string' ? chunk : chunk.toString('utf8');
     outputChunks.push(normalized);
     return true;
-  }) as any;
+  }) as (chunk: string | Buffer) => boolean;
 
   try {
     fn();

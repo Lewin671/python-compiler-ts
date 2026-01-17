@@ -1,6 +1,6 @@
 {
   "name": "@lewin671/python-vm",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A powerful, high-performance Python 3 Virtual Machine and Compiler engineered in pure TypeScript.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -29,6 +29,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
