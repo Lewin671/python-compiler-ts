@@ -369,23 +369,39 @@ export function getAttribute(this: VirtualMachine, obj: any, name: string, scope
         let keyFn = args.length > 0 ? args[0] : null;
         if ('key' in kwargs) keyFn = kwargs.key;
         const reverse = 'reverse' in kwargs ? Boolean(kwargs.reverse) : false;
+
+        const initialLength = obj.length;
         if (keyFn) {
-          const keyed = obj.map((item: any) => ({
-            item,
-            key: this.callFunction(keyFn, [item], scope),
-          }));
+          const keyed = [];
+          for (let i = 0; i < initialLength; i++) {
+            const item = obj[i];
+            const key = this.callFunction(keyFn, [item], scope);
+            if (obj.length !== initialLength) {
+              throw new PyException('ValueError', 'list modified during sort');
+            }
+            keyed.push({ item, key });
+          }
           keyed.sort((a, b) => {
             if (isNumericLike(a.key) && isNumericLike(b.key)) {
               return toNumber(a.key) - toNumber(b.key);
             }
             return String(a.key).localeCompare(String(b.key));
           });
+          if (obj.length !== initialLength) {
+            throw new PyException('ValueError', 'list modified during sort');
+          }
           obj.length = 0;
           obj.push(...keyed.map((entry) => entry.item));
         } else if (obj.every((value: any) => isNumericLike(value))) {
           obj.sort((a: any, b: any) => toNumber(a) - toNumber(b));
+          if (obj.length !== initialLength) {
+            throw new PyException('ValueError', 'list modified during sort');
+          }
         } else {
           obj.sort();
+          if (obj.length !== initialLength) {
+            throw new PyException('ValueError', 'list modified during sort');
+          }
         }
         if (reverse) obj.reverse();
         return null;
