@@ -298,6 +298,10 @@ export function getAttribute(this: VirtualMachine, obj: any, name: string, scope
   }
   if (typeof obj === 'string') {
     if (name === 'upper') return () => obj.toUpperCase();
+    if (name === 'join') return (iterable: any) => {
+      const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+      return arr.map(item => pyStr(item)).join(obj);
+    };
     if (name === 'replace')
       return (a: any, b: any) => {
         return obj.replace(a, b);
@@ -329,9 +333,23 @@ export function getAttribute(this: VirtualMachine, obj: any, name: string, scope
         });
       };
     if (name === 'count') return (ch: any) => obj.split(ch).length - 1;
+    if (name === 'split') return (sep: string = ' ') => obj.split(sep);
+    if (name === 'strip') return () => obj.trim();
+    if (name === 'lower') return () => obj.toLowerCase();
+    if (name === 'startswith') return (prefix: string) => obj.startsWith(prefix);
+    if (name === 'endswith') return (suffix: string) => obj.endsWith(suffix);
   }
   if (Array.isArray(obj)) {
     if (name === 'append') return (value: any) => obj.push(value);
+    if (name === 'pop') return (index?: number) => {
+      if (index === undefined) return obj.pop();
+      return obj.splice(index, 1)[0];
+    };
+    if (name === 'extend') return (iterable: any) => {
+      const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+      obj.push(...arr);
+      return null;
+    };
     if (name === 'count') return (value: any) => obj.filter((item: any) => item === value).length;
     if (name === 'index') return (value: any) => obj.indexOf(value);
     if (name === 'sort') {
