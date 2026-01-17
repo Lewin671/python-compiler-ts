@@ -24,6 +24,28 @@ export function applyInPlaceBinary(this: VirtualMachine, op: string, left: PyVal
 }
 
 export function applyBinary(this: VirtualMachine, op: string, left: PyValue, right: PyValue): PyValue {
+  // Fast path for common numeric operations
+  if (typeof left === 'number' && typeof right === 'number') {
+    switch (op) {
+      case '+': return left + right;
+      case '-': return left - right;
+      case '*': return left * right;
+      case '/':
+        if (right === 0) throw new PyException('ZeroDivisionError', 'division by zero');
+        return new Number(left / right);
+      case '//':
+        if (right === 0) throw new PyException('ZeroDivisionError', 'division by zero');
+        return Math.floor(left / right);
+      case '%': return pythonModulo(left, right);
+      case '**': return Math.pow(left, right);
+      case '&': return left & right;
+      case '|': return left | right;
+      case '^': return left ^ right;
+      case '<<': return left << right;
+      case '>>': return left >> right;
+    }
+  }
+  
   if (isComplex(left) || isComplex(right)) {
     const a = toComplex(left);
     const b = toComplex(right);

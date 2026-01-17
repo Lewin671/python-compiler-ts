@@ -91,7 +91,8 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         case OpCode.LOAD_CONST:
           {
             const val: PyValue = constants[arg!];
-            if (val && typeof val === 'object' && typeof val.__fstring__ === 'string') {
+            // Fast path: most constants are not f-strings
+            if (val && typeof val === 'object' && '__fstring__' in val) {
               frame.stack.push(renderFString(val.__fstring__, frame.scope));
             } else {
               frame.stack.push(val);
@@ -135,19 +136,20 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         }
 
         case OpCode.LOAD_FAST: {
-          const varname = varnames[arg!];
-          if (varname !== undefined && frame.scope.values.has(varname)) {
-            const val = frame.scope.values.get(varname);
-            frame.locals[arg!] = val;
+          const val = frame.locals[arg!];
+          if (val !== undefined) {
             frame.stack.push(val);
             break;
           }
-          const val = frame.locals[arg!];
-          if (val === undefined) {
-            throw new PyException('UnboundLocalError', `local variable '${varname}' referenced before assignment`);
+          // Check scope only if not found in locals
+          const varname = varnames[arg!];
+          if (varname !== undefined && frame.scope.values.has(varname)) {
+            const scopeVal = frame.scope.values.get(varname);
+            frame.locals[arg!] = scopeVal;
+            frame.stack.push(scopeVal);
+            break;
           }
-          frame.stack.push(val);
-          break;
+          throw new PyException('UnboundLocalError', `local variable '${varname}' referenced before assignment`);
         }
 
         case OpCode.STORE_FAST: {
@@ -333,49 +335,87 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         case OpCode.BINARY_ADD: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('+', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            frame.stack.push(a + b);
+          } else {
+            frame.stack.push(this.applyBinary('+', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_SUBTRACT: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('-', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            frame.stack.push(a - b);
+          } else {
+            frame.stack.push(this.applyBinary('-', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_MULTIPLY: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('*', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            frame.stack.push(a * b);
+          } else {
+            frame.stack.push(this.applyBinary('*', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_DIVIDE: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('/', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            if (b === 0) throw new PyException('ZeroDivisionError', 'division by zero');
+            frame.stack.push(new Number(a / b));
+          } else {
+            frame.stack.push(this.applyBinary('/', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_FLOOR_DIVIDE: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('//', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            if (b === 0) throw new PyException('ZeroDivisionError', 'division by zero');
+            frame.stack.push(Math.floor(a / b));
+          } else {
+            frame.stack.push(this.applyBinary('//', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_MODULO: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('%', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            const mod = a % b;
+            frame.stack.push((mod * b < 0 && mod !== 0) ? mod + b : mod);
+          } else {
+            frame.stack.push(this.applyBinary('%', a, b));
+          }
           break;
         }
 
         case OpCode.BINARY_POWER: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyBinary('**', a, b));
+          // Fast path for numbers
+          if (typeof a === 'number' && typeof b === 'number') {
+            frame.stack.push(Math.pow(a, b));
+          } else {
+            frame.stack.push(this.applyBinary('**', a, b));
+          }
           break;
         }
 
@@ -516,7 +556,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.UNARY_NOT: {
           const a = frame.stack.pop();
-          frame.stack.push(!this.isTruthy(a, frame.scope));
+          // Fast path for common types
+          let result: boolean;
+          if (typeof a === 'boolean') {
+            result = !a;
+          } else if (typeof a === 'number') {
+            result = a === 0;
+          } else if (a === null || a === undefined) {
+            result = true;
+          } else {
+            result = !this.isTruthy(a, frame.scope);
+          }
+          frame.stack.push(result);
           break;
         }
 
@@ -533,20 +584,49 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         case OpCode.COMPARE_OP: {
           const b = frame.stack.pop();
           const a = frame.stack.pop();
-          frame.stack.push(this.applyCompare(arg as CompareOp, a, b));
+          // Fast path for simple number comparisons
+          if (typeof a === 'number' && typeof b === 'number') {
+            let result: boolean;
+            switch (arg as CompareOp) {
+              case CompareOp.EQ: result = a === b; break;
+              case CompareOp.NE: result = a !== b; break;
+              case CompareOp.LT: result = a < b; break;
+              case CompareOp.LE: result = a <= b; break;
+              case CompareOp.GT: result = a > b; break;
+              case CompareOp.GE: result = a >= b; break;
+              case CompareOp.IS: result = a === b; break;
+              case CompareOp.IS_NOT: result = a !== b; break;
+              default: result = this.applyCompare(arg as CompareOp, a, b);
+            }
+            frame.stack.push(result);
+          } else {
+            frame.stack.push(this.applyCompare(arg as CompareOp, a, b));
+          }
           break;
         }
 
         case OpCode.BUILD_LIST: {
-          const list = [];
-          for (let i = 0; i < arg!; i++) list.unshift(frame.stack.pop());
+          const count = arg!;
+          const list = new Array(count);
+          const stackLen = frame.stack.length;
+          // Copy elements directly from stack (they're already in reverse order)
+          for (let i = count - 1; i >= 0; i--) {
+            list[i] = frame.stack[stackLen - count + i];
+          }
+          frame.stack.length = stackLen - count;
           frame.stack.push(list);
           break;
         }
 
         case OpCode.BUILD_TUPLE: {
-          const tuple: PyValue[] = [];
-          for (let i = 0; i < arg!; i++) tuple.unshift(frame.stack.pop());
+          const count = arg!;
+          const tuple: PyValue[] = new Array(count);
+          const stackLen = frame.stack.length;
+          // Copy elements directly from stack
+          for (let i = count - 1; i >= 0; i--) {
+            tuple[i] = frame.stack[stackLen - count + i];
+          }
+          frame.stack.length = stackLen - count;
           (tuple as PyValue).__tuple__ = true;
           frame.stack.push(tuple);
           break;
@@ -591,7 +671,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.POP_JUMP_IF_FALSE: {
           const val = frame.stack.pop();
-          if (!this.isTruthy(val, frame.scope)) {
+          // Fast path for common truthy checks
+          let isFalse: boolean;
+          if (typeof val === 'boolean') {
+            isFalse = !val;
+          } else if (typeof val === 'number') {
+            isFalse = val === 0;
+          } else if (val === null || val === undefined) {
+            isFalse = true;
+          } else {
+            isFalse = !this.isTruthy(val, frame.scope);
+          }
+          if (isFalse) {
             frame.pc = arg!;
           }
           break;
@@ -599,7 +690,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.POP_JUMP_IF_TRUE: {
           const val = frame.stack.pop();
-          if (this.isTruthy(val, frame.scope)) {
+          // Fast path for common truthy checks
+          let isTrue: boolean;
+          if (typeof val === 'boolean') {
+            isTrue = val;
+          } else if (typeof val === 'number') {
+            isTrue = val !== 0;
+          } else if (val === null || val === undefined) {
+            isTrue = false;
+          } else {
+            isTrue = this.isTruthy(val, frame.scope);
+          }
+          if (isTrue) {
             frame.pc = arg!;
           }
           break;
@@ -607,7 +709,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.JUMP_IF_FALSE_OR_POP: {
           const val = frame.stack[frame.stack.length - 1];
-          if (!this.isTruthy(val, frame.scope)) {
+          // Fast path for common truthy checks
+          let isFalse: boolean;
+          if (typeof val === 'boolean') {
+            isFalse = !val;
+          } else if (typeof val === 'number') {
+            isFalse = val === 0;
+          } else if (val === null || val === undefined) {
+            isFalse = true;
+          } else {
+            isFalse = !this.isTruthy(val, frame.scope);
+          }
+          if (isFalse) {
             frame.pc = arg!;
           } else {
             frame.stack.pop();
@@ -617,7 +730,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.JUMP_IF_TRUE_OR_POP: {
           const val = frame.stack[frame.stack.length - 1];
-          if (this.isTruthy(val, frame.scope)) {
+          // Fast path for common truthy checks
+          let isTrue: boolean;
+          if (typeof val === 'boolean') {
+            isTrue = val;
+          } else if (typeof val === 'number') {
+            isTrue = val !== 0;
+          } else if (val === null || val === undefined) {
+            isTrue = false;
+          } else {
+            isTrue = this.isTruthy(val, frame.scope);
+          }
+          if (isTrue) {
             frame.pc = arg!;
           } else {
             frame.stack.pop();
@@ -768,10 +892,14 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         }
 
         case OpCode.CALL_FUNCTION: {
-          const args = [];
-          for (let i = 0; i < arg!; i++) {
-            args.unshift(frame.stack.pop());
+          const count = arg!;
+          const args = new Array(count);
+          const stackLen = frame.stack.length;
+          // Copy args directly from stack (they're in correct order at the end)
+          for (let i = count - 1; i >= 0; i--) {
+            args[i] = frame.stack[stackLen - count + i];
           }
+          frame.stack.length = stackLen - count;
           const func = frame.stack.pop();
           frame.stack.push(this.callFunction(func, args, frame.scope));
           break;
