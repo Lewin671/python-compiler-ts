@@ -1,5 +1,5 @@
 import type { VirtualMachine } from './vm';
-import { PyClass, PyDict, PyException, PyFile, PyGenerator, Scope } from './runtime-types';
+import { PyClass, PyDict, PyException, PyFile, PyGenerator, PySet, Scope } from './runtime-types';
 import { isFloatLike, isNumericLike, pyStr, pyTypeName, toBigIntValue, toNumber } from './value-utils';
 
 export function installBuiltins(this: VirtualMachine, scope: Scope) {
@@ -22,7 +22,7 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
   });
   builtins.set('len', (value: any) => {
     if (typeof value === 'string' || Array.isArray(value)) return value.length;
-    if (value instanceof PyDict || value instanceof Set) return value.size;
+    if (value instanceof PyDict || value instanceof PySet) return value.size;
     throw new PyException('TypeError', 'object has no len()');
   });
   builtins.set('range', (...args: any[]) => {
@@ -50,7 +50,7 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
   });
   const listFn = (value: any) => {
     if (Array.isArray(value)) return [...value];
-    if (value instanceof Set) return Array.from(value.values());
+    if (value instanceof PySet) return Array.from(value.values());
     if (value && typeof value[Symbol.iterator] === 'function') return Array.from(value);
     return [];
   };
@@ -64,10 +64,10 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
   (tupleFn as any).__typeName__ = 'tuple';
   builtins.set('tuple', tupleFn);
   const setFn = (value: any) => {
-    if (value instanceof Set) return new Set(value);
-    if (Array.isArray(value)) return new Set(value);
-    if (value && typeof value[Symbol.iterator] === 'function') return new Set(Array.from(value));
-    return new Set();
+    if (value instanceof PySet) return new PySet(value);
+    if (Array.isArray(value)) return new PySet(value);
+    if (value && typeof value[Symbol.iterator] === 'function') return new PySet(Array.from(value));
+    return new PySet();
   };
   (setFn as any).__typeName__ = 'set';
   builtins.set('set', setFn);

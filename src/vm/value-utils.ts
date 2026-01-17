@@ -1,4 +1,4 @@
-import { PyClass, PyDict, PyException, PyFunction, PyInstance } from './runtime-types';
+import { PyClass, PyDict, PyException, PyFunction, PyInstance, PySet } from './runtime-types';
 
 export const isPyNone = (value: any) => value === null;
 
@@ -66,7 +66,7 @@ export const pyTypeName = (value: any): string => {
   if (typeof value === 'number') return Number.isInteger(value) ? 'int' : 'float';
   if (typeof value === 'string') return 'str';
   if (Array.isArray(value)) return (value as any).__tuple__ ? 'tuple' : 'list';
-  if (value instanceof Set) return 'set';
+  if (value instanceof PySet) return 'set';
   if (value instanceof PyDict) return 'dict';
   if (value instanceof PyFunction) return 'function';
   if (value instanceof PyClass) return 'type';
@@ -95,7 +95,7 @@ export const pyRepr = (value: any, seen: Set<any> = new Set()): string => {
   }
   if (typeof value === 'string') return `'${value.replace(/'/g, "\\'")}'`;
 
-  const isContainer = Array.isArray(value) || value instanceof Set || value instanceof PyDict;
+  const isContainer = Array.isArray(value) || value instanceof PySet || value instanceof PyDict;
   if (isContainer) {
     if (seen.has(value)) {
       if (Array.isArray(value)) return (value as any).__tuple__ ? '(...)' : '[...]';
@@ -111,7 +111,7 @@ export const pyRepr = (value: any, seen: Set<any> = new Set()): string => {
         }
         return `[${items}]`;
       }
-      if (value instanceof Set) {
+      if (value instanceof PySet) {
         const items = Array.from(value.values())
           .map((v) => pyRepr(v, seen))
           .join(', ');

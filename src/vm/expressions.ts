@@ -2,7 +2,7 @@ import type { VirtualMachine } from './vm';
 import { ASTNodeType } from '../types';
 import { Lexer } from '../lexer';
 import { Parser } from '../parser';
-import { PyClass, PyDict, PyException, PyFunction, PyGenerator, PyInstance, Scope } from './runtime-types';
+import { PyClass, PyDict, PyException, PyFunction, PyGenerator, PyInstance, PySet, Scope } from './runtime-types';
 import {
   isFloatObject,
   isIntObject,
@@ -64,7 +64,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
       return arr;
     }
     case ASTNodeType.SET_COMP: {
-      const result = new Set<any>();
+      const result = new PySet();
       const compScope = new Scope(scope);
       this.evaluateComprehension(node.comprehension, compScope, () => {
         result.add(this.evaluateExpression(node.expression, compScope));
@@ -72,7 +72,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
       return result;
     }
     case ASTNodeType.SET_LITERAL:
-      return new Set(node.elements.map((el: any) => this.evaluateExpression(el, scope)));
+      return new PySet(node.elements.map((el: any) => this.evaluateExpression(el, scope)));
     case ASTNodeType.DICT_LITERAL: {
       const map = new PyDict();
       for (const entry of node.entries) {
@@ -359,15 +359,10 @@ export function contains(this: VirtualMachine, container: any, value: any): bool
     return container.includes(value);
   }
   if (typeof container === 'string') return container.includes(value);
-  if (container instanceof Set) {
-    if (container.has(value)) return true;
-    if (isNumericLike(value)) {
-      for (const item of container.values()) {
-        if (isNumericLike(item) && numericEquals(item, value)) return true;
-      }
-    }
-    return false;
+  if (container instanceof PySet) {
+    return container.has(value);
   }
   if (container instanceof PyDict) return container.has(value);
   return false;
 }
+

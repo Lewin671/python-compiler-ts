@@ -1,6 +1,6 @@
 import type { VirtualMachine } from './vm';
 import { ASTNodeType } from '../types';
-import { PyClass, PyDict, PyException, PyFile, PyFunction, PyGenerator, PyInstance, Scope } from './runtime-types';
+import { PyClass, PyDict, PyException, PyFile, PyFunction, PyGenerator, PyInstance, PySet, Scope } from './runtime-types';
 import {
   bigIntFloorDiv,
   isComplex,
@@ -61,8 +61,8 @@ export function applyBinary(this: VirtualMachine, op: string, left: any, right: 
       }
       return left + right;
     case '-':
-      if (left instanceof Set && right instanceof Set) {
-        const result = new Set(left);
+      if (left instanceof PySet && right instanceof PySet) {
+        const result = new PySet(left);
         for (const item of right.values()) result.delete(item);
         return result;
       }
@@ -142,8 +142,8 @@ export function applyBinary(this: VirtualMachine, op: string, left: any, right: 
       }
       return Math.pow(toNumber(left), toNumber(right));
     case '&':
-      if (left instanceof Set && right instanceof Set) {
-        const result = new Set<any>();
+      if (left instanceof PySet && right instanceof PySet) {
+        const result = new PySet();
         for (const item of left.values()) {
           if (right.has(item)) result.add(item);
         }
@@ -154,8 +154,8 @@ export function applyBinary(this: VirtualMachine, op: string, left: any, right: 
       }
       return left & right;
     case '|':
-      if (left instanceof Set && right instanceof Set) {
-        const result = new Set<any>(left);
+      if (left instanceof PySet && right instanceof PySet) {
+        const result = new PySet(left);
         for (const item of right.values()) result.add(item);
         return result;
       }
@@ -164,8 +164,8 @@ export function applyBinary(this: VirtualMachine, op: string, left: any, right: 
       }
       return left | right;
     case '^':
-      if (left instanceof Set && right instanceof Set) {
-        const result = new Set<any>();
+      if (left instanceof PySet && right instanceof PySet) {
+        const result = new PySet();
         for (const item of left.values()) {
           if (!right.has(item)) result.add(item);
         }
@@ -404,7 +404,7 @@ export function getAttribute(this: VirtualMachine, obj: any, name: string, scope
     if (typeof value === 'function') return value.bind(obj);
     return value;
   }
-  if (obj instanceof Set) {
+  if (obj instanceof PySet) {
     if (name === 'add')
       return (value: any) => {
         obj.add(value);

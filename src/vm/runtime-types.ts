@@ -228,6 +228,9 @@ export class PyDict {
   private keyInfo(key: any): { store: Map<any, DictEntry>; id: any } {
     const numeric = this.normalizeNumericKey(key);
     if (numeric !== null) {
+      if (typeof numeric === 'number' && Number.isNaN(numeric)) {
+        return { store: this.objectStore, id: key };
+      }
       return { store: this.primitiveStore, id: `n:${String(numeric)}` };
     }
     if (typeof key === 'string') {
@@ -247,6 +250,87 @@ export class PyDict {
     if (typeof key === 'bigint') return key;
     if (typeof key === 'number') return key;
     if (key instanceof Number) return key.valueOf();
+    return null;
+  }
+}
+
+export class PySet {
+  private primitiveStore: Map<string, any> = new Map();
+  private objectStore: Map<any, any> = new Map();
+
+  constructor(iterable?: Iterable<any>) {
+    if (iterable) {
+      for (const item of iterable) {
+        this.add(item);
+      }
+    }
+  }
+
+  get size(): number {
+    return this.primitiveStore.size + this.objectStore.size;
+  }
+
+  add(value: any): this {
+    const info = this.valueInfo(value);
+    if (!info.store.has(info.id)) {
+      info.store.set(info.id, value);
+    }
+    return this;
+  }
+
+  has(value: any): boolean {
+    const info = this.valueInfo(value);
+    return info.store.has(info.id);
+  }
+
+  delete(value: any): boolean {
+    const info = this.valueInfo(value);
+    return info.store.delete(info.id);
+  }
+
+  clear(): void {
+    this.primitiveStore.clear();
+    this.objectStore.clear();
+  }
+
+  *values(): IterableIterator<any> {
+    for (const value of this.primitiveStore.values()) {
+      yield value;
+    }
+    for (const value of this.objectStore.values()) {
+      yield value;
+    }
+  }
+
+  [Symbol.iterator](): IterableIterator<any> {
+    return this.values();
+  }
+
+  private valueInfo(value: any): { store: Map<any, any>; id: any } {
+    const numeric = this.normalizeNumeric(value);
+    if (numeric !== null) {
+      if (typeof numeric === 'number' && Number.isNaN(numeric)) {
+        return { store: this.objectStore, id: value };
+      }
+      return { store: this.primitiveStore, id: `n:${String(numeric)}` };
+    }
+    if (typeof value === 'string') {
+      return { store: this.primitiveStore, id: `s:${value}` };
+    }
+    if (value === null) {
+      return { store: this.primitiveStore, id: 'none' };
+    }
+    if (value === undefined) {
+      return { store: this.primitiveStore, id: 'undefined' };
+    }
+    return { store: this.objectStore, id: value };
+  }
+
+  private normalizeNumeric(value: any): number | bigint | null {
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return value;
+    if (value instanceof Number) return value.valueOf();
     return null;
   }
 }

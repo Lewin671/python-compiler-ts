@@ -1,5 +1,5 @@
 import type { VirtualMachine } from './vm';
-import { PyDict, PyException, PyInstance, Scope } from './runtime-types';
+import { PyDict, PyException, PyInstance, PySet, Scope } from './runtime-types';
 import { isNumericLike, toNumber } from './value-utils';
 
 export function isTruthy(this: VirtualMachine, value: any, scope: Scope): boolean {
@@ -11,7 +11,7 @@ export function isTruthy(this: VirtualMachine, value: any, scope: Scope): boolea
   if (typeof value === 'string') return value.length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (value instanceof PyDict) return value.size > 0;
-  if (value instanceof Set) return value.size > 0;
+  if (value instanceof PySet) return value.size > 0;
   if (value instanceof PyInstance) {
     const boolAttr = this.findClassAttribute(value.klass, '__bool__');
     if (boolAttr !== undefined) {

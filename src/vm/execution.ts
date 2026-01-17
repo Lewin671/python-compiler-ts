@@ -1,6 +1,6 @@
 import type { VirtualMachine } from './vm';
 import { ByteCode, ASTNodeType } from '../types';
-import { BreakSignal, ContinueSignal, ReturnSignal, Scope } from './runtime-types';
+import { BreakSignal, ContinueSignal, ReturnSignal, Scope, PySet } from './runtime-types';
 import { PyDict } from './runtime-types';
 
 export function execute(this: VirtualMachine, bytecode: ByteCode): any {
@@ -23,7 +23,7 @@ export function executeBlock(this: VirtualMachine, body: any[], scope: Scope): a
 
 export function iterableToArray(this: VirtualMachine, iterable: any): any[] {
   if (iterable instanceof PyDict) return Array.from(iterable.keys());
-  if (iterable instanceof Set) return Array.from(iterable.values());
+  if (iterable instanceof PySet) return Array.from(iterable.values());
   if (Array.isArray(iterable)) return iterable;
   if (iterable && typeof iterable[Symbol.iterator] === 'function') return Array.from(iterable);
   throw new Error('Object is not iterable');
