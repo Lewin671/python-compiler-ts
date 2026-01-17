@@ -65,10 +65,7 @@ function main() {
       const buffer = fs.readFileSync(inputFile);
       const bytecode = Serializer.deserialize(buffer);
       const vm = new VirtualMachine([process.cwd()]);
-      const result = vm.execute(bytecode);
-      if (result !== undefined) {
-        console.log(result);
-      }
+      vm.execute(bytecode);
     } catch (error) {
       console.error('Runtime Error:', error instanceof Error ? error.message : error);
       process.exit(1);
@@ -85,10 +82,7 @@ function main() {
   }
 
   try {
-    const result = compiler.runFile(filePath);
-    if (result !== undefined) {
-      console.log(result);
-    }
+    compiler.runFile(filePath);
   } catch (error) {
     console.error('Error:', error instanceof Error ? error.message : error);
     process.exit(1);
