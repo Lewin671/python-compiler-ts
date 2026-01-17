@@ -15,6 +15,7 @@ import {
 import { assignTarget, deleteTarget, executeStatement, toIterableArray } from './statements';
 import {
   applyBinary,
+  applyInPlaceBinary,
   computeSliceBounds,
   computeSliceIndices,
   findClassAttribute,
@@ -62,6 +63,7 @@ export class VirtualMachine {
   contains = contains;
   isTruthy = isTruthy;
   applyBinary = applyBinary;
+  applyInPlaceBinary = applyInPlaceBinary;
   formatPercent = formatPercent;
   getSubscript = getSubscript;
   computeSliceBounds = computeSliceBounds;

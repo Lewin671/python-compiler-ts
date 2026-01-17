@@ -25,7 +25,7 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
     case ASTNodeType.AUG_ASSIGNMENT: {
       const current = this.evaluateExpression(node.target, scope);
       const value = this.evaluateExpression(node.value, scope);
-      const result = this.applyBinary(node.operator.slice(0, -1), current, value);
+      const result = this.applyInPlaceBinary(node.operator, current, value);
       this.assignTarget(node.target, result, scope);
       return null;
     }
@@ -151,9 +151,11 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
       throw new PyException('Exception', exc ? String(exc) : 'Exception');
     }
     case ASTNodeType.TRY_STATEMENT: {
+      let raised = false;
       try {
         this.executeBlock(node.body, scope);
       } catch (err) {
+        raised = true;
         let handled = false;
         for (const handler of node.handlers) {
           if (!handler.exceptionType) {
@@ -180,7 +182,7 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
           this.executeBlock(node.finalbody, scope);
         }
       }
-      if (node.orelse?.length) {
+      if (!raised && node.orelse?.length) {
         this.executeBlock(node.orelse, scope);
       }
       return null;
@@ -242,6 +244,9 @@ export function assignTarget(this: VirtualMachine, target: any, value: any, scop
       index = this.evaluateExpression(target.index, scope);
     }
     if (Array.isArray(obj)) {
+      if ((obj as any).__tuple__) {
+        throw new PyException('TypeError', "'tuple' object does not support item assignment");
+      }
       if (index && index.type === ASTNodeType.SLICE) {
         const start = index.start !== null ? index.start : null;
         const end = index.end !== null ? index.end : null;
@@ -328,6 +333,9 @@ export function deleteTarget(this: VirtualMachine, target: any, scope: Scope) {
       index = this.evaluateExpression(target.index, scope);
     }
     if (Array.isArray(obj)) {
+      if ((obj as any).__tuple__) {
+        throw new PyException('TypeError', "'tuple' object does not support item assignment");
+      }
       if (index && index.type === ASTNodeType.SLICE) {
         const start = index.start !== null ? index.start : null;
         const end = index.end !== null ? index.end : null;

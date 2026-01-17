@@ -17,6 +17,14 @@ import {
   pyTypeName,
 } from './value-utils';
 
+export function applyInPlaceBinary(this: VirtualMachine, op: string, left: any, right: any): any {
+  if (op === '+=' && Array.isArray(left) && !(left as any).__tuple__ && Array.isArray(right)) {
+    left.push(...right);
+    return left;
+  }
+  return this.applyBinary(op.slice(0, -1), left, right);
+}
+
 export function applyBinary(this: VirtualMachine, op: string, left: any, right: any): any {
   if (isComplex(left) || isComplex(right)) {
     const a = toComplex(left);
