@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { VirtualMachine } from './vm';
 import { Lexer } from '../lexer';
+import { Program } from '../types';
 import { Parser } from '../parser';
 import { PyValue, PyException, PyFunction, PyGenerator, Scope } from './runtime-types';
 
@@ -46,7 +47,7 @@ export function loadModuleFromFile(this: VirtualMachine, name: string, scope: Sc
   const ast = parser.parse();
   const moduleScope = new Scope(scope.root());
   moduleScope.set('__name__', name);
-  this.executeBlock(ast['body'], moduleScope);
+  this.executeBlock((ast as Program).body, moduleScope);
   return { __name__: name, __moduleScope__: moduleScope };
 }
 

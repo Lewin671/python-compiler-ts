@@ -1,6 +1,5 @@
-
 import type { Parser } from './parser';
-import { ASTNode, ASTNodeType, TokenType } from '../types';
+import { ASTNode, ASTNodeType, TokenType, FunctionDef } from '../types';
 
 export function parseExpressionStatement(this: Parser): ASTNode {
   return { type: ASTNodeType.EXPRESSION_STATEMENT, expression: this.parseExpression() };
@@ -130,11 +129,11 @@ export function parseFunctionParameters(this: Parser): ASTNode[] {
       if (this.match(TokenType.OPERATOR, '*')) {
         this.consume();
         const name = this.expect(TokenType.IDENTIFIER).value;
-        params.push({ type: 'VarArg', name } as ASTNode);
+        params.push({ type: ASTNodeType.VAR_ARG, name } as ASTNode);
       } else if (this.match(TokenType.OPERATOR, '**')) {
         this.consume();
         const name = this.expect(TokenType.IDENTIFIER).value;
-        params.push({ type: 'KwArg', name } as ASTNode);
+        params.push({ type: ASTNodeType.KW_ARG, name } as ASTNode);
       } else if (this.match(TokenType.IDENTIFIER)) {
         const name = this.consume().value;
         let defaultValue: ASTNode | null = null;
@@ -142,7 +141,7 @@ export function parseFunctionParameters(this: Parser): ASTNode[] {
           this.consume();
           defaultValue = this.parseExpression();
         }
-        params.push({ type: 'Param', name, defaultValue } as ASTNode);
+        params.push({ type: ASTNodeType.PARAM, name, defaultValue } as ASTNode);
       }
       if (!this.match(TokenType.COMMA)) break;
       this.consume();
@@ -301,22 +300,33 @@ export function parseStatement(this: Parser): ASTNode {
   this.skipNewlines();
   if (this.match(TokenType.AT)) {
     const decorators = this.parseDecorators();
+    let isAsync = false;
     if (this.match(TokenType.KEYWORD, 'async')) {
       this.consume();
-      if (!this.match(TokenType.KEYWORD, 'def')) throw new Error('async must be followed by def');
-      const node = this.parseFunctionDef(decorators);
-      node['isAsync'] = true;
-      return node;
+      isAsync = true;
     }
-    if (this.match(TokenType.KEYWORD, 'def')) return this.parseFunctionDef(decorators);
-    if (this.match(TokenType.KEYWORD, 'class')) return this.parseClassDef(decorators);
-    throw new Error('Decorator must be followed by def or class');
+    if (!this.match(TokenType.KEYWORD, 'def') && !this.match(TokenType.KEYWORD, 'class')) {
+      throw new Error('Decorators must be followed by def or class');
+    }
+    let node: ASTNode;
+    if (this.match(TokenType.KEYWORD, 'def')) {
+      node = this.parseFunctionDef(decorators);
+      if (isAsync) {
+        (node as FunctionDef).isAsync = true;
+      }
+    } else { // class
+      node = this.parseClassDef(decorators);
+      if (isAsync) {
+        throw new Error('async keyword cannot be used with class definitions');
+      }
+    }
+    return node;
   }
   if (this.match(TokenType.KEYWORD, 'async')) {
     this.consume();
     if (!this.match(TokenType.KEYWORD, 'def')) throw new Error('async must be followed by def');
-    const node = this.parseFunctionDef();
-    node['isAsync'] = true;
+    const node = this.parseFunctionDef() as FunctionDef;
+    node.isAsync = true;
     return node;
   }
   if (this.match(TokenType.KEYWORD, 'import')) return this.parseImportStatement();

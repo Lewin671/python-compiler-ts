@@ -1,5 +1,5 @@
 import type { VirtualMachine } from './vm';
-import { ASTNodeType } from '../types';
+import { ASTNodeType, Program } from '../types';
 import { Lexer } from '../lexer';
 import { Parser } from '../parser';
 import { PyValue, PyDict, PyException, PyFunction, PyGenerator, PySet, Scope } from './runtime-types';
@@ -130,7 +130,7 @@ export function evaluateExpression(this: VirtualMachine, node: PyValue, scope: S
         case '~':
           return ~operand;
         default:
-          throw new PyException('TypeError', `unsupported unary operator ${node.operator}`);
+          throw new PyException('TypeError', `unsupported unary operator ${node.operator} `);
       }
     }
     case ASTNodeType.BOOL_OPERATION: {
@@ -203,7 +203,7 @@ export function evaluateExpression(this: VirtualMachine, node: PyValue, scope: S
             result = left !== right;
             break;
           default:
-            throw new PyException('TypeError', `unsupported comparison ${op}`);
+            throw new PyException('TypeError', `unsupported comparison ${op} `);
         }
         if (!result) return false;
         left = right;
@@ -268,15 +268,15 @@ export function evaluateExpression(this: VirtualMachine, node: PyValue, scope: S
       );
     }
     default:
-      throw new Error(`Unsupported expression type: ${node.type}`);
+      throw new Error(`Unsupported expression type: ${node.type} `);
   }
 }
 
 export function evaluateExpressionString(this: VirtualMachine, expr: string, scope: Scope): PyValue {
-  const wrapped = `__f = ${expr}\n`;
+  const wrapped = `__f = ${expr} \n`;
   const tokens = new Lexer(wrapped).tokenize();
   const ast = new Parser(tokens).parse();
-  const assignment = ast['body'][0];
+  const assignment = (ast as Program).body[0];
   if (!assignment || assignment.type !== ASTNodeType.ASSIGNMENT) {
     return this.executeExpressionInline(expr, scope);
   }

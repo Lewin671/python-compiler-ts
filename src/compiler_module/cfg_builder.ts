@@ -1,4 +1,24 @@
-import { ASTNode, ASTNodeType, OpCode, CompareOp, BasicBlock, CFG } from '../types';
+import {
+    ASTNode,
+    ASTNodeType,
+    OpCode,
+    CompareOp,
+    BasicBlock,
+    CFG,
+    IfStatement,
+    WhileStatement,
+    ForStatement,
+    FunctionDef,
+    Lambda,
+    BoolOperation,
+    IfExpression,
+    Subscript,
+    Attribute,
+    KeywordArg,
+    Param,
+    VarArg,
+    KwArg
+} from '../types';
 import type { PyValue } from '../vm/runtime-types';
 import { Linearizer } from './linearizer';
 import { parseStringToken } from '../common/string-token';
@@ -109,16 +129,9 @@ export class CFGBuilder {
                 // Handle augmented assignment (+=, -=, etc.)
                 // For subscripts and attributes, we need to avoid re-evaluating the target
                 if (node.target.type === ASTNodeType.SUBSCRIPT) {
-                    // For x[i] += value:
-                    // 1. Load x, load i (evaluate both once)
-                    // 2. DUP_TOP_TWO to duplicate x and i
-                    // 3. LOAD_SUBSCR to get x[i]
-                    // 4. Load value
-                    // 5. Inplace operation
-                    // 6. ROT_THREE to bring x and i to top
-                    // 7. STORE_SUBSCR
-                    this.visit(node.target.object || node.target.value);
-                    this.visit(node.target.index || node.target.slice);
+                    const target = node.target as Subscript;
+                    this.visit(target.object);
+                    this.visit(target.index);
                     this.addInstruction(OpCode.DUP_TOP_TWO);
                     this.addInstruction(OpCode.LOAD_SUBSCR);
                     this.visit(node.value);
@@ -126,19 +139,13 @@ export class CFGBuilder {
                     this.addInstruction(OpCode.ROT_THREE);
                     this.addInstruction(OpCode.STORE_SUBSCR);
                 } else if (node.target.type === ASTNodeType.ATTRIBUTE) {
-                    // For x.attr += value:
-                    // 1. Load x (evaluate once)               -> [x]
-                    // 2. DUP_TOP to duplicate x               -> [x, x]
-                    // 3. LOAD_ATTR to get x.attr              -> [x, attr_val]
-                    // 4. Load value                           -> [x, attr_val, value]
-                    // 5. Inplace operation                    -> [x, new_val]
-                    // 6. STORE_ATTR (pops new_val, then x)
-                    this.visit(node.target.object || node.target.value);
+                    const target = node.target as Attribute;
+                    this.visit(target.object);
                     this.addInstruction(OpCode.DUP_TOP);
-                    this.addInstruction(OpCode.LOAD_ATTR, this.getNameIndex(node.target.name || node.target.attr));
+                    this.addInstruction(OpCode.LOAD_ATTR, this.getNameIndex(target.name));
                     this.visit(node.value);
                     this.addInplaceOperation(node.operator.slice(0, -1));
-                    this.addInstruction(OpCode.STORE_ATTR, this.getNameIndex(node.target.name || node.target.attr));
+                    this.addInstruction(OpCode.STORE_ATTR, this.getNameIndex(target.name));
                 } else {
                     // For simple names: load, operate in-place, store
                     this.visit(node.target);
@@ -199,9 +206,7 @@ export class CFGBuilder {
                 }
                 break;
 
-            case 'StarArg':
-            case 'KwArg':
-                this.visit(node.value);
+            case ASTNodeType.COMPREHENSION:
                 break;
 
             case ASTNodeType.BINARY_OPERATION:
@@ -224,7 +229,7 @@ export class CFGBuilder {
                 break;
 
             case ASTNodeType.COMPARE: {
-                const operators = node.ops || node.operators || [];
+                const operators = node.ops || [];
                 if (operators.length === 0) {
                     this.visit(node.left);
                 } else if (operators.length === 1) {
@@ -274,24 +279,22 @@ export class CFGBuilder {
             }
 
             case ASTNodeType.CALL:
-                this.visit(node.callee || node.func);
+                this.visit(node.callee);
                 {
-                    const rawArgs = (node.args || []) as ASTNode[];
-                    const hasStar = rawArgs.some(a => a && a.type === 'StarArg');
-                    const hasKw = rawArgs.some(a => a && a.type === 'KwArg');
+                    const rawArgs = node.args;
+                    const hasStar = rawArgs.some(a => a && a.type === ASTNodeType.STAR_ARG);
+                    const hasKw = rawArgs.some(a => a && a.type === ASTNodeType.KW_ARG);
 
                     if (hasStar || hasKw) {
-                        // Simplified CALL_FUNCTION_EX: assumes [pos_args_tuple, kw_args_dict]
-                        // find the *args
-                        const starArg = rawArgs.find(a => a && a.type === 'StarArg');
-                        if (starArg) {
+                        const starArg = rawArgs.find(a => a && a.type === ASTNodeType.STAR_ARG);
+                        if (starArg && 'value' in starArg) {
                             this.visit(starArg.value);
                         } else {
                             this.addInstruction(OpCode.BUILD_TUPLE, 0);
                         }
 
-                        const kwArg = rawArgs.find(a => a && a.type === 'KwArg');
-                        if (kwArg) {
+                        const kwArg = rawArgs.find(a => a && a.type === ASTNodeType.KW_ARG);
+                        if (kwArg && 'value' in kwArg) {
                             this.visit(kwArg.value);
                             this.addInstruction(OpCode.CALL_FUNCTION_EX, 1);
                         } else {
@@ -299,11 +302,10 @@ export class CFGBuilder {
                         }
                     } else {
                         const positional: ASTNode[] = [];
-                        const keyword: Array<{ type: 'KeywordArg'; name: string; value: ASTNode }> = [];
-
+                        const keyword: Array<{ type: ASTNodeType.KEYWORD_ARG; name: string; value: ASTNode }> = [];
                         for (const a of rawArgs) {
-                            if (a && a.type === 'KeywordArg') {
-                                keyword.push(a);
+                            if (a && a.type === ASTNodeType.KEYWORD_ARG) {
+                                keyword.push(a as KeywordArg);
                             } else {
                                 positional.push(a);
                             }
@@ -346,9 +348,8 @@ export class CFGBuilder {
                 break;
 
             case ASTNodeType.CLASS_DEF: {
-                const bases = (node.bases || []) as ASTNode[];
                 const subBuilder = new CFGBuilder(0, []);
-                const subCfg = subBuilder.build({ type: ASTNodeType.PROGRAM, body: node.body || [] });
+                const subCfg = subBuilder.build({ type: ASTNodeType.PROGRAM, body: node.body });
                 const linearizer = new Linearizer();
                 const subBytecode = linearizer.linearize(
                     subCfg,
@@ -360,7 +361,7 @@ export class CFGBuilder {
                     subBuilder.getGlobals(),
                     subBuilder.getNonlocals()
                 );
-                subBytecode.name = `<classbody ${node.name}>`;
+                subBytecode.name = `< classbody ${node.name}> `;
 
                 // build_class(class_body_fn, name, *bases)
                 this.addInstruction(OpCode.LOAD_BUILD_CLASS);
@@ -368,10 +369,10 @@ export class CFGBuilder {
                 this.addInstruction(OpCode.LOAD_CONST, this.getConstantIndex(subBytecode.name));
                 this.addInstruction(OpCode.MAKE_FUNCTION, 0);
                 this.addInstruction(OpCode.LOAD_CONST, this.getConstantIndex(node.name));
-                for (const base of bases) {
+                for (const base of node.bases) {
                     this.visit(base);
                 }
-                this.addInstruction(OpCode.CALL_FUNCTION, 2 + bases.length);
+                this.addInstruction(OpCode.CALL_FUNCTION, 2 + node.bases.length);
                 this.addInstruction(OpCode.STORE_NAME, this.getNameIndex(node.name));
                 break;
             }
@@ -399,13 +400,13 @@ export class CFGBuilder {
                 break;
 
             case ASTNodeType.ATTRIBUTE:
-                this.visit(node.object || node.value);
-                this.addInstruction(OpCode.LOAD_ATTR, this.getNameIndex(node.name || node.attr));
+                this.visit(node.object);
+                this.addInstruction(OpCode.LOAD_ATTR, this.getNameIndex(node.name));
                 break;
 
             case ASTNodeType.SUBSCRIPT:
-                this.visit(node.object || node.value);
-                this.visit(node.index || node.slice);
+                this.visit(node.object);
+                this.visit(node.index);
                 this.addInstruction(OpCode.LOAD_SUBSCR);
                 break;
 
@@ -475,9 +476,8 @@ export class CFGBuilder {
 
                 this.currentBlock = failBlock;
                 this.addInstruction(OpCode.LOAD_NAME, this.getNameIndex('AssertionError'));
-                const messageNode = node.message ?? node.msg;
-                if (messageNode) {
-                    this.visit(messageNode);
+                if (node.message) {
+                    this.visit(node.message);
                     this.addInstruction(OpCode.CALL_FUNCTION, 1);
                 } else {
                     this.addInstruction(OpCode.CALL_FUNCTION, 0);
@@ -595,7 +595,7 @@ export class CFGBuilder {
             case '&': this.addInstruction(OpCode.BINARY_AND); break;
             case '^': this.addInstruction(OpCode.BINARY_XOR); break;
             case '|': this.addInstruction(OpCode.BINARY_OR); break;
-            default: throw new Error(`Unknown operator: ${operator}`);
+            default: throw new Error(`Unknown operator: ${operator} `);
         }
     }
 
@@ -613,7 +613,7 @@ export class CFGBuilder {
             case '&': this.addInstruction(OpCode.INPLACE_AND); break;
             case '^': this.addInstruction(OpCode.INPLACE_XOR); break;
             case '|': this.addInstruction(OpCode.INPLACE_OR); break;
-            default: throw new Error(`Unknown operator: ${operator}`);
+            default: throw new Error(`Unknown operator: ${operator} `);
         }
     }
 
@@ -630,7 +630,7 @@ export class CFGBuilder {
             case 'not in': op = CompareOp.NOT_IN; break;
             case 'is': op = CompareOp.IS; break;
             case 'is not': op = CompareOp.IS_NOT; break;
-            default: throw new Error(`Unknown compare operator: ${operator}`);
+            default: throw new Error(`Unknown compare operator: ${operator} `);
         }
         this.addInstruction(OpCode.COMPARE_OP, op);
     }
@@ -655,13 +655,13 @@ export class CFGBuilder {
                     this.visitTarget(node.target, mode);
                     break;
                 case ASTNodeType.ATTRIBUTE:
-                    this.visit(node.object || node.value);
+                    this.visit(node.object);
                     this.addInstruction(OpCode.ROT_TWO);
-                    this.addInstruction(OpCode.STORE_ATTR, this.getNameIndex(node.name || node.attr));
+                    this.addInstruction(OpCode.STORE_ATTR, this.getNameIndex(node.name));
                     break;
                 case ASTNodeType.SUBSCRIPT:
-                    this.visit(node.object || node.value);
-                    this.visit(node.index || node.slice);
+                    this.visit(node.object);
+                    this.visit(node.index);
                     this.addInstruction(OpCode.STORE_SUBSCR);
                     break;
                 case ASTNodeType.TUPLE_LITERAL:
@@ -682,7 +682,7 @@ export class CFGBuilder {
                     break;
                 }
                 default:
-                    throw new Error(`Unsupported assignment target: ${node.type}`);
+                    throw new Error(`Unsupported assignment target: ${node.type} `);
             }
         } else if (mode === 'delete') {
             switch (node.type) {
@@ -698,12 +698,12 @@ export class CFGBuilder {
                     }
                     break;
                 case ASTNodeType.ATTRIBUTE:
-                    this.visit(node.object || node.value);
-                    this.addInstruction(OpCode.DELETE_ATTR, this.getNameIndex(node.name || node.attr));
+                    this.visit(node.object);
+                    this.addInstruction(OpCode.DELETE_ATTR, this.getNameIndex(node.name));
                     break;
                 case ASTNodeType.SUBSCRIPT:
-                    this.visit(node.object || node.value);
-                    this.visit(node.index || node.slice);
+                    this.visit(node.object);
+                    this.visit(node.index);
                     this.addInstruction(OpCode.DELETE_SUBSCR);
                     break;
                 case ASTNodeType.TUPLE_LITERAL:
@@ -713,12 +713,12 @@ export class CFGBuilder {
                     }
                     break;
                 default:
-                    throw new Error(`Unsupported delete target: ${node.type}`);
+                    throw new Error(`Unsupported delete target: ${node.type} `);
             }
         }
     }
 
-    private visitIf(node: ASTNode) {
+    private visitIf(node: IfStatement) {
         const thenBlock = this.createBlock();
 
         // Convert elifs to nested if statements in orelse
@@ -768,7 +768,7 @@ export class CFGBuilder {
         this.currentBlock = mergeBlock;
     }
 
-    private visitWhile(node: ASTNode) {
+    private visitWhile(node: WhileStatement) {
         const loopBlock = this.createBlock();
         const bodyBlock = this.createBlock();
         const endBlock = this.createBlock();
@@ -796,17 +796,17 @@ export class CFGBuilder {
         // Only add jump-back if current block is reachable and doesn't already have a transfer
         if (this.currentBlock.reachable !== false && !this.currentBlock.next && !this.currentBlock.jumpTarget) {
             if (process.env['DEBUG_CFG']) {
-                console.log(`WHILE: Adding jump-back from block ${this.currentBlock.id} to loop block ${loopBlock.id}`);
+                console.log(`WHILE: Adding jump - back from block ${this.currentBlock.id} to loop block ${loopBlock.id} `);
             }
             this.currentBlock.next = loopBlock;
         } else if (process.env['DEBUG_CFG']) {
-            console.log(`WHILE: NOT adding jump-back from block ${this.currentBlock.id}: reachable=${this.currentBlock.reachable}, hasNext=${!!this.currentBlock.next}, hasJumpTarget=${!!this.currentBlock.jumpTarget}`);
+            console.log(`WHILE: NOT adding jump - back from block ${this.currentBlock.id}: reachable = ${this.currentBlock.reachable}, hasNext = ${!!this.currentBlock.next}, hasJumpTarget = ${!!this.currentBlock.jumpTarget} `);
         }
 
         this.currentBlock = endBlock;
     }
 
-    private visitFor(node: PyValue) {
+    private visitFor(node: ForStatement) {
         this.visit(node.iter);
         this.addInstruction(OpCode.GET_ITER);
 
@@ -841,29 +841,35 @@ export class CFGBuilder {
         // Only add jump-back if current block is reachable and doesn't already have a transfer
         if (this.currentBlock.reachable !== false && !this.currentBlock.next && !this.currentBlock.jumpTarget) {
             if (process.env['DEBUG_CFG']) {
-                console.log(`FOR: Adding jump-back from block ${this.currentBlock.id} to loop block ${loopBlock.id}`);
+                console.log(`FOR: Adding jump - back from block ${this.currentBlock.id} to loop block ${loopBlock.id} `);
             }
             this.currentBlock.next = loopBlock;
         } else if (process.env['DEBUG_CFG']) {
-            console.log(`FOR: NOT adding jump-back from block ${this.currentBlock.id}: reachable=${this.currentBlock.reachable}, hasNext=${!!this.currentBlock.next}, hasJumpTarget=${!!this.currentBlock.jumpTarget}`);
+            console.log(`FOR: NOT adding jump - back from block ${this.currentBlock.id}: reachable = ${this.currentBlock.reachable}, hasNext = ${!!this.currentBlock.next}, hasJumpTarget = ${!!this.currentBlock.jumpTarget} `);
         }
 
         this.currentBlock = endBlock;
     }
 
-    private visitFunctionDef(node: PyValue) {
+    private visitFunctionDef(node: FunctionDef) {
         const isGenerator = this.containsYield(node.body || []);
-        const parameterNames = node.params.map((p: PyValue) => p.name);
+        const parameterNames = node.params.map((p) => {
+            if (p.type === ASTNodeType.PARAM) return (p as Param).name;
+            if (p.type === ASTNodeType.VAR_ARG) return (p as VarArg).name;
+            if (p.type === ASTNodeType.KW_ARG) return (p as KwArg).name || '';
+            return '';
+        });
 
         // Analyze function body to find all assigned variables (for local scope detection)
         const assignedVars = this.findAssignedVariables(node.body || []);
         const localVars = [...parameterNames, ...assignedVars];
 
         // Evaluate default arguments at function definition time
-        const defaultsCount = node.params.filter((p: PyValue) => p.defaultValue).length;
-        for (const param of node.params) {
-            if (param.defaultValue) {
-                this.visit(param.defaultValue);
+        let defaultsCount = 0;
+        for (const p of node.params) {
+            if (p.type === ASTNodeType.PARAM && p.defaultValue) {
+                this.visit(p.defaultValue);
+                defaultsCount++;
             }
         }
 
@@ -1002,7 +1008,7 @@ export class CFGBuilder {
         // Don't extract from subscripts or attributes - those aren't local variable assignments
     }
 
-    private visitLambda(node: PyValue) {
+    private visitLambda(node: Lambda) {
         // Parser represents lambda params as strings (e.g. ['x'] or ['*args', '**kwargs']).
         // Normalize to the same param shape as FunctionDef so VM call binding works.
         const rawParams: PyValue[] = Array.isArray(node.params) ? node.params : [];
@@ -1016,7 +1022,7 @@ export class CFGBuilder {
         });
         const parameterNames = params.map((p: PyValue) => p.name);
         const subBuilder = new CFGBuilder(params.length, parameterNames);
-        const bodyBlock = { type: ASTNodeType.RETURN_STATEMENT, value: node.body };
+        const bodyBlock: ASTNode = { type: ASTNodeType.RETURN_STATEMENT, value: node.body };
         const subCfg = subBuilder.build({ type: ASTNodeType.PROGRAM, body: [bodyBlock] });
         const linearizer = new Linearizer();
         const subBytecode = linearizer.linearize(
@@ -1042,11 +1048,11 @@ export class CFGBuilder {
             case '-': this.addInstruction(OpCode.UNARY_NEGATIVE); break;
             case 'not': this.addInstruction(OpCode.UNARY_NOT); break;
             case '~': this.addInstruction(OpCode.UNARY_INVERT); break;
-            default: throw new Error(`Unknown unary operator: ${operator}`);
+            default: throw new Error(`Unknown unary operator: ${operator} `);
         }
     }
 
-    private visitBoolOp(node: PyValue) {
+    private visitBoolOp(node: BoolOperation) {
         // Boolean operations with short-circuit evaluation
         // For 'and': if first is false, skip rest
         // For 'or': if first is true, skip rest
@@ -1084,7 +1090,7 @@ export class CFGBuilder {
         }
     }
 
-    private visitIfExpression(node: PyValue) {
+    private visitIfExpression(node: IfExpression) {
         // Ternary: <body> if <test> else <orelse>
         // Evaluate test first
         this.visit(node.test);
@@ -1097,8 +1103,8 @@ export class CFGBuilder {
         this.currentBlock.jumpTarget = falseBlock;
         this.currentBlock.next = trueBlock;
 
-        const consequent = node.body ?? node.consequent;
-        const alternate = node.orelse ?? node.alternate;
+        const consequent = node.consequent;
+        const alternate = node.alternate;
 
         // True branch
         this.currentBlock = trueBlock;
@@ -1350,7 +1356,7 @@ export class CFGBuilder {
         // My VM implementation for `WITH_EXCEPT_START`:
         // If handled, it returns. The exception is GONE from stack (popped inside opcode).
         // Wait, checked my VM implementation:
-        // `const exc = frame.stack.pop(); const exit = frame.stack.pop();`
+        // `const exc = frame.stack.pop(); const exit = frame.stack.pop(); `
         // So stack is empty of exc/exit.
 
         this.currentBlock.next = afterWithBlock;
