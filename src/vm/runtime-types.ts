@@ -31,7 +31,6 @@ export class PyException extends Error {
 
 export class Frame {
   public stack: PyValue[] = [];
-  public sp: number = 0; // Stack pointer for optimized stack operations
   public pc: number = 0;
   public scope: Scope;
   public bytecode: ByteCode;
@@ -42,8 +41,6 @@ export class Frame {
     this.bytecode = bytecode;
     this.scope = scope;
     this.locals = new Array((bytecode.varnames || []).length).fill(undefined);
-    // Don't pre-allocate - let V8 handle array growth naturally
-    this.sp = 0;
   }
 }
 
