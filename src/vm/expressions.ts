@@ -151,12 +151,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
           case '<': {
             const numeric = numericCompare(left, right);
             if (numeric) {
-              if (numeric.kind === 'float') {
-                result =
-                  !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) < (numeric.right as number);
-              } else {
-                result = (numeric.left as bigint) < (numeric.right as bigint);
-              }
+              result = numeric.left < numeric.right;
             } else {
               result = left < right;
             }
@@ -165,12 +160,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
           case '>': {
             const numeric = numericCompare(left, right);
             if (numeric) {
-              if (numeric.kind === 'float') {
-                result =
-                  !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) > (numeric.right as number);
-              } else {
-                result = (numeric.left as bigint) > (numeric.right as bigint);
-              }
+              result = numeric.left > numeric.right;
             } else {
               result = left > right;
             }
@@ -179,12 +169,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
           case '<=': {
             const numeric = numericCompare(left, right);
             if (numeric) {
-              if (numeric.kind === 'float') {
-                result =
-                  !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) <= (numeric.right as number);
-              } else {
-                result = (numeric.left as bigint) <= (numeric.right as bigint);
-              }
+              result = numeric.left <= numeric.right;
             } else {
               result = left <= right;
             }
@@ -193,12 +178,7 @@ export function evaluateExpression(this: VirtualMachine, node: any, scope: Scope
           case '>=': {
             const numeric = numericCompare(left, right);
             if (numeric) {
-              if (numeric.kind === 'float') {
-                result =
-                  !Number.isNaN(numeric.left) && !Number.isNaN(numeric.right) && (numeric.left as number) >= (numeric.right as number);
-              } else {
-                result = (numeric.left as bigint) >= (numeric.right as bigint);
-              }
+              result = numeric.left >= numeric.right;
             } else {
               result = left >= right;
             }

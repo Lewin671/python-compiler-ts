@@ -30,24 +30,22 @@ export const shouldUseBigInt = (left: any, right: any): boolean =>
   (isBigInt(left) || isBigInt(right)) && !isFloatLike(left) && !isFloatLike(right);
 export const numericEquals = (left: any, right: any): boolean => {
   if (isNumericLike(left) && isNumericLike(right)) {
-    if (isFloatLike(left) || isFloatLike(right)) {
-      const leftNum = toNumber(left);
-      const rightNum = toNumber(right);
-      return !Number.isNaN(leftNum) && !Number.isNaN(rightNum) && leftNum === rightNum;
-    }
-    return toBigIntValue(left) === toBigIntValue(right);
+    const l = left instanceof Number ? left.valueOf() : left;
+    const r = right instanceof Number ? right.valueOf() : right;
+    // Use loose equality to handle mixed types (int, float, bool, bigint)
+    // JS == handles bigint vs number correctly without precision loss.
+    return l == r;
   }
   return left === right;
 };
 export const numericCompare = (
   left: any,
   right: any
-): { kind: 'float' | 'int'; left: number | bigint; right: number | bigint } | null => {
+): { left: any; right: any } | null => {
   if (!isNumericLike(left) || !isNumericLike(right)) return null;
-  if (isFloatLike(left) || isFloatLike(right)) {
-    return { kind: 'float', left: toNumber(left), right: toNumber(right) };
-  }
-  return { kind: 'int', left: toBigIntValue(left), right: toBigIntValue(right) };
+  const l = left instanceof Number ? left.valueOf() : left;
+  const r = right instanceof Number ? right.valueOf() : right;
+  return { left: l, right: r };
 };
 
 export const bigIntFloorDiv = (left: bigint, right: bigint): bigint => {

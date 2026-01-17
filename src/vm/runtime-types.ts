@@ -244,7 +244,7 @@ export class PyDict {
       if (typeof numeric === 'number' && Number.isNaN(numeric)) {
         return { store: this.objectStore, id: key };
       }
-      return { store: this.primitiveStore, id: `n:${String(numeric)}` };
+      return { store: this.primitiveStore, id: `n:${numeric.toString()}` };
     }
     if (typeof key === 'string') {
       return { store: this.primitiveStore, id: `s:${key}` };
@@ -259,10 +259,13 @@ export class PyDict {
   }
 
   private normalizeNumericKey(key: any): number | bigint | null {
-    if (typeof key === 'boolean') return key ? 1 : 0;
+    if (typeof key === 'boolean') return key ? 1n : 0n;
     if (typeof key === 'bigint') return key;
-    if (typeof key === 'number') return key;
-    if (key instanceof Number) return key.valueOf();
+    if (typeof key === 'number' || key instanceof Number) {
+      const v = key.valueOf();
+      if (Number.isFinite(v) && Number.isInteger(v)) return BigInt(v);
+      return v;
+    }
     return null;
   }
 }
@@ -325,7 +328,7 @@ export class PySet {
       if (typeof numeric === 'number' && Number.isNaN(numeric)) {
         return { store: this.objectStore, id: value };
       }
-      return { store: this.primitiveStore, id: `n:${String(numeric)}` };
+      return { store: this.primitiveStore, id: `n:${numeric.toString()}` };
     }
     if (typeof value === 'string') {
       return { store: this.primitiveStore, id: `s:${value}` };
@@ -340,10 +343,13 @@ export class PySet {
   }
 
   private normalizeNumeric(value: any): number | bigint | null {
-    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (typeof value === 'boolean') return value ? 1n : 0n;
     if (typeof value === 'bigint') return value;
-    if (typeof value === 'number') return value;
-    if (value instanceof Number) return value.valueOf();
+    if (typeof value === 'number' || value instanceof Number) {
+      const v = value.valueOf();
+      if (Number.isFinite(v) && Number.isInteger(v)) return BigInt(v);
+      return v;
+    }
     return null;
   }
 }
