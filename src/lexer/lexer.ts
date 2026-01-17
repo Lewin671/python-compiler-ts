@@ -71,19 +71,17 @@ export class Lexer {
           advance();
         }
 
-        if (peek() === '\n') {
-          if (bracketLevel === 0) {
-            this.tokens.push(createToken(TokenType.NEWLINE, '\n'));
+        // Blank lines or comment-only lines are ignored
+        if (peek() === '\n' || peek() === '#') {
+          if (peek() === '#') {
+            while (this.pos < this.code.length && peek() !== '\n') {
+              advance();
+            }
           }
-          advance();
-          this.atLineStart = true;
-          continue;
-        }
-
-        if (peek() === '#') {
-          while (this.pos < this.code.length && peek() !== '\n') {
+          if (peek() === '\n') {
             advance();
           }
+          this.atLineStart = true;
           continue;
         }
 

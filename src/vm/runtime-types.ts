@@ -42,7 +42,7 @@ export class Scope {
     if (this.locals.has(name)) {
       throw new PyException('UnboundLocalError', `local variable '${name}' referenced before assignment`);
     }
-    let p = this.parent;
+    let p: Scope | null = this.parent;
     while (p && p.isClassScope) {
       p = p.parent;
     }
@@ -58,7 +58,7 @@ export class Scope {
       return;
     }
     if (this.nonlocals.has(name) && this.parent) {
-      let p = this.parent;
+      let p: Scope | null = this.parent;
       while (p && p.isClassScope) {
         p = p.parent;
       }

@@ -21,20 +21,36 @@ export function parseExpressionList(this: Parser): ASTNode {
 
 export function parseAssignmentOrExpression(this: Parser): ASTNode {
   const startPos = this.pos;
-  let target: ASTNode | null = null;
+  const targets: ASTNode[] = [];
 
-  try {
-    target = this.parseTarget();
-  } catch (e) {
-    // If parsing as target fails, it might be a valid expression statement
+  while (true) {
+    const mark = this.pos;
+    try {
+      const target = this.parseTarget();
+      if (this.match(TokenType.ASSIGN)) {
+        this.consume();
+        targets.push(target);
+        continue;
+      }
+    } catch (e) {
+      // Not a target or no assignment
+    }
+    this.pos = mark;
+    break;
   }
 
+  if (targets.length > 0) {
+    const value = this.parseExpressionList();
+    return { type: ASTNodeType.ASSIGNMENT, targets, value };
+  }
+
+  this.pos = startPos;
+  let target: ASTNode | null = null;
+  try {
+    target = this.parseTarget();
+  } catch (e) {}
+
   if (target) {
-    if (this.match(TokenType.ASSIGN)) {
-      this.consume();
-      const value = this.parseExpressionList();
-      return { type: ASTNodeType.ASSIGNMENT, targets: [target], value };
-    }
     if (
       this.match(TokenType.OPERATOR) &&
       ['+=', '-=', '*=', '/=', '%=', '//=', '**='].includes(this.peek()?.value || '')
