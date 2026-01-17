@@ -74,7 +74,7 @@ export const pyTypeName = (value: any): string => {
   return typeof value;
 };
 
-export const pyRepr = (value: any): string => {
+export const pyRepr = (value: any, seen: Set<any> = new Set()): string => {
   if (value === null) return 'None';
   if (value instanceof Number) {
     const num = value.valueOf();
@@ -94,22 +94,40 @@ export const pyRepr = (value: any): string => {
     return `(${value.re}${sign}${imag}j)`;
   }
   if (typeof value === 'string') return `'${value.replace(/'/g, "\\'")}'`;
-  if (Array.isArray(value)) {
-    const items = value.map((v: any) => pyRepr(v)).join(', ');
-    if ((value as any).__tuple__) {
-      if (value.length === 1) return `(${items},)`;
-      return `(${items})`;
+
+  const isContainer = Array.isArray(value) || value instanceof Set || value instanceof PyDict;
+  if (isContainer) {
+    if (seen.has(value)) {
+      if (Array.isArray(value)) return (value as any).__tuple__ ? '(...)' : '[...]';
+      return '{...}';
     }
-    return `[${items}]`;
+    seen.add(value);
+    try {
+      if (Array.isArray(value)) {
+        const items = value.map((v: any) => pyRepr(v, seen)).join(', ');
+        if ((value as any).__tuple__) {
+          if (value.length === 1) return `(${items},)`;
+          return `(${items})`;
+        }
+        return `[${items}]`;
+      }
+      if (value instanceof Set) {
+        const items = Array.from(value.values())
+          .map((v) => pyRepr(v, seen))
+          .join(', ');
+        return `{${items}}`;
+      }
+      if (value instanceof PyDict) {
+        const items = Array.from(value.entries())
+          .map(([k, v]) => `${pyRepr(k, seen)}: ${pyRepr(v, seen)}`)
+          .join(', ');
+        return `{${items}}`;
+      }
+    } finally {
+      seen.delete(value);
+    }
   }
-  if (value instanceof Set) {
-    const items = Array.from(value.values()).map((v) => pyRepr(v)).join(', ');
-    return `{${items}}`;
-  }
-  if (value instanceof PyDict) {
-    const items = Array.from(value.entries()).map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`).join(', ');
-    return `{${items}}`;
-  }
+
   if (value instanceof PyFunction) return `<function ${value.name}>`;
   if (value instanceof PyClass) return `<class '${value.name}'>`;
   if (value instanceof PyInstance) return `<${value.klass.name} object>`;
