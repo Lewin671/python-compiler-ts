@@ -48,6 +48,18 @@ npm run build
 npm start -- examples/hello.py
 ```
 
+### AOT 预编译 (Ahead-Of-Time)
+
+您可以将 Python 源代码编译为压缩的二进制字节码格式 (`.pyc`)，并在后续直接加载执行，从而避免运行时的解析开销。
+
+```bash
+# 1. 将源码编译为字节码
+npm start -- compile examples/hello.py hello.pyc
+
+# 2. 直接运行字节码文件
+npm start -- run hello.pyc
+```
+
 ### 在 TypeScript 项目中调用
 
 ```ts

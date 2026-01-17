@@ -15,7 +15,12 @@ export class PythonCompiler {
    * @param code Python 源代码
    * @returns 执行结果
    */
-  run(code: string): PyValue {
+  /**
+   * 编译 Python 代码到字节码
+   * @param code Python 源代码
+   * @returns 字节码对象
+   */
+  compile(code: string): any {
     // 1. 词法分析
     const lexer = new Lexer(code);
     const tokens = lexer.tokenize();
@@ -26,7 +31,16 @@ export class PythonCompiler {
 
     // 3. 编译到字节码
     const compiler = new Compiler();
-    const bytecode = compiler.compile(ast);
+    return compiler.compile(ast);
+  }
+
+  /**
+   * 编译并运行 Python 代码
+   * @param code Python 源代码
+   * @returns 执行结果
+   */
+  run(code: string): PyValue {
+    const bytecode = this.compile(code);
 
     // 4. 执行字节码
     const vm = new VirtualMachine([process.cwd()]);

@@ -48,6 +48,18 @@ npm run build
 npm start -- examples/hello.py
 ```
 
+### AOT Compilation (Ahead-Of-Time)
+
+You can compile Python source files to a compressed binary bytecode format (`.pyc`) and execute them later. This avoids parsing overhead at runtime.
+
+```bash
+# 1. Compile source to bytecode
+npm start -- compile examples/hello.py hello.pyc
+
+# 2. Run the bytecode directly
+npm start -- run hello.pyc
+```
+
 ### Using in your TypeScript project
 
 ```ts
