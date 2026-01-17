@@ -137,29 +137,29 @@ async function main() {
   const results = [];
 
   results.push(benchmark(
-    'Fibonacci(27)',
+    'Fibonacci(30)',
     `
 def fib(n):
     if n <= 1:
         return n
     return fib(n-1) + fib(n-2)
 
-print(fib(27))
+print(fib(30))
 `
   ));
 
   results.push(benchmark(
-    'List Operations (200000)',
+    'List Operations (1000000)',
     `
 lst = []
-for i in range(200000):
+for i in range(1000000):
     lst.append(i)
 print(sum(lst))
 `
   ));
 
   results.push(benchmark(
-    'Primes (5000-6000)',
+    'Primes (25000-30000)',
     `
 def is_prime(n):
     if n < 2:
@@ -169,42 +169,42 @@ def is_prime(n):
             return False
     return True
 
-primes = [i for i in range(5000, 6000) if is_prime(i)]
+primes = [i for i in range(25000, 30000) if is_prime(i)]
 print(len(primes))
 `
   ));
 
   results.push(benchmark(
-    'Dictionary Ops (50000)',
+    'Dictionary Ops (250000)',
     `
 d = {}
-for i in range(50000):
+for i in range(250000):
     d[str(i)] = i * 2
 
 count = 0
 for v in d.values():
-    if v > 25000:
+    if v > 125000:
         count += 1
 print(count)
 `
   ));
 
   results.push(benchmark(
-    'Nested Loops (500x500)',
+    'Nested Loops (1118x1118)',
     `
 total = 0
-for i in range(500):
-    for j in range(500):
+for i in range(1118):
+    for j in range(1118):
         total += i * j
 print(total)
 `
   ));
 
   results.push(benchmark(
-    'String Operations (20000)',
+    'String Operations (100000)',
     `
 result = []
-for i in range(20000):
+for i in range(100000):
     s = f"Value: {i}, Double: {i*2}, Triple: {i*3}"
     result.append(s.upper() + s.lower())
 print(len(result))
@@ -212,9 +212,9 @@ print(len(result))
   ));
 
   results.push(benchmark(
-    'List Comprehension (50000)',
+    'List Comprehension (250000)',
     `
-result = [x*x for x in range(50000) if x % 2 == 0]
+result = [x*x for x in range(250000) if x % 2 == 0]
 print(sum(result))
 `
   ));
