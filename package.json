@@ -17,6 +17,7 @@
     "test": "PYTHONHASHSEED=0 vitest run",
     "test:watch": "PYTHONHASHSEED=0 vitest",
     "test:coverage": "PYTHONHASHSEED=0 vitest run --coverage",
+    "benchmark": "npm run build && node scripts/benchmark.cjs",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\""
   },
