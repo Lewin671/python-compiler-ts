@@ -36,11 +36,18 @@ export class Frame {
   public bytecode: ByteCode;
   public locals: PyValue[] = [];
   public blockStack: Array<{ handler: number; stackHeight: number }> = [];
+  public globalScope: Scope;
 
   constructor(bytecode: ByteCode, scope: Scope) {
     this.bytecode = bytecode;
     this.scope = scope;
     this.locals = new Array((bytecode.varnames || []).length).fill(undefined);
+    // Cache the global scope to avoid repeated traversal
+    let globalScope = scope;
+    while (globalScope.parent !== null) {
+      globalScope = globalScope.parent;
+    }
+    this.globalScope = globalScope;
   }
 }
 
@@ -58,19 +65,27 @@ export class Scope {
   }
 
   get(name: string): ScopeValue {
-    if (this.values.has(name)) {
-      return this.values.get(name);
+    // Fast path: check local values first
+    const localVal = this.values.get(name);
+    if (localVal !== undefined) {
+      return localVal;
     }
+    
+    // Check if it's a declared local that hasn't been assigned
     if (this.locals.has(name)) {
       throw new PyException('UnboundLocalError', `local variable '${name}' referenced before assignment`);
     }
 
+    // Check nonlocals
     if (this.nonlocals.has(name) && this.parent) {
       const scope = this.findScopeWith(name, true);
-      // If we found a scope, return the actual reference from its Map
-      if (scope) return scope.values.get(name);
+      if (scope) {
+        const val = scope.values.get(name);
+        if (val !== undefined) return val;
+      }
     }
 
+    // Traverse parent chain, skipping class scopes
     let p: Scope | null = this.parent;
     while (p && p.isClassScope) {
       p = p.parent;
@@ -243,6 +258,18 @@ export class PyDict {
   }
 
   set(key: PyValue, value: PyValue): this {
+    // Fast path for string keys (most common case)
+    if (typeof key === 'string') {
+      const id = `s:${key}`;
+      const existing = this.primitiveStore.get(id);
+      if (existing) {
+        existing.value = value;
+        return this;
+      }
+      this.primitiveStore.set(id, { key, value });
+      return this;
+    }
+    
     const info = this.keyInfo(key);
     const existing = info.store.get(info.id);
     if (existing) {
@@ -254,12 +281,23 @@ export class PyDict {
   }
 
   get(key: PyValue): PyValue {
+    // Fast path for string keys
+    if (typeof key === 'string') {
+      const entry = this.primitiveStore.get(`s:${key}`);
+      return entry ? entry.value : undefined;
+    }
+    
     const info = this.keyInfo(key);
     const entry = info.store.get(info.id);
     return entry ? entry.value : undefined;
   }
 
   has(key: PyValue): boolean {
+    // Fast path for string keys
+    if (typeof key === 'string') {
+      return this.primitiveStore.has(`s:${key}`);
+    }
+    
     const info = this.keyInfo(key);
     return info.store.has(info.id);
   }

@@ -15,6 +15,23 @@ import {
   pyStr,
 } from './value-utils';
 
+// Cache for array methods to avoid creating new closures
+const arrayMethodCache = new WeakMap<PyValue[], Map<string, PyValue>>();
+
+function getArrayMethod(arr: PyValue[], name: string, creator: () => PyValue): PyValue {
+  let cache = arrayMethodCache.get(arr);
+  if (!cache) {
+    cache = new Map();
+    arrayMethodCache.set(arr, cache);
+  }
+  let method = cache.get(name);
+  if (!method) {
+    method = creator();
+    cache.set(name, method);
+  }
+  return method;
+}
+
 export function applyInPlaceBinary(this: VirtualMachine, op: string, left: PyValue, right: PyValue): PyValue {
   if (op === '+' && Array.isArray(left) && !(left as PyValue).__tuple__ && Array.isArray(right)) {
     left.push(...right);
@@ -362,21 +379,25 @@ export function getAttribute(this: VirtualMachine, obj: PyValue, name: string, s
   }
   if (Array.isArray(obj)) {
     if (name === 'append')
-      return (value: PyValue) => {
+      return getArrayMethod(obj, 'append', () => (value: PyValue) => {
         obj.push(value);
         return null;
-      };
-    if (name === 'pop') return (index?: number) => {
-      if (index === undefined) return obj.pop();
-      return obj.splice(index, 1)[0];
-    };
-    if (name === 'extend') return (iterable: PyValue) => {
-      const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
-      obj.push(...arr);
-      return null;
-    };
-    if (name === 'count') return (value: PyValue) => obj.filter((item: PyValue) => item === value).length;
-    if (name === 'index') return (value: PyValue) => obj.indexOf(value);
+      });
+    if (name === 'pop')
+      return getArrayMethod(obj, 'pop', () => (index?: number) => {
+        if (index === undefined) return obj.pop();
+        return obj.splice(index, 1)[0];
+      });
+    if (name === 'extend')
+      return getArrayMethod(obj, 'extend', () => (iterable: PyValue) => {
+        const arr = Array.isArray(iterable) ? iterable : Array.from(iterable);
+        obj.push(...arr);
+        return null;
+      });
+    if (name === 'count')
+      return getArrayMethod(obj, 'count', () => (value: PyValue) => obj.filter((item: PyValue) => item === value).length);
+    if (name === 'index')
+      return getArrayMethod(obj, 'index', () => (value: PyValue) => obj.indexOf(value));
     if (name === 'sort') {
       return (...args: PyValue[]) => {
         let kwargs: Record<string, PyValue> = {};
