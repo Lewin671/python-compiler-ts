@@ -23,10 +23,77 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
       return null;
     }
     case ASTNodeType.AUG_ASSIGNMENT: {
-      const current = this.evaluateExpression(node.target, scope);
-      const value = this.evaluateExpression(node.value, scope);
-      const result = this.applyInPlaceBinary(node.operator, current, value);
-      this.assignTarget(node.target, result, scope);
+      const target = node.target;
+      let current: any;
+      let obj: any;
+      let index: any;
+
+      if (target.type === ASTNodeType.IDENTIFIER) {
+        current = scope.get(target.name);
+        const value = this.evaluateExpression(node.value, scope);
+        const result = this.applyInPlaceBinary(node.operator, current, value);
+        scope.set(target.name, result);
+      } else if (target.type === ASTNodeType.ATTRIBUTE) {
+        obj = this.evaluateExpression(target.object, scope);
+        current = this.getAttribute(obj, target.name, scope);
+        const value = this.evaluateExpression(node.value, scope);
+        const result = this.applyInPlaceBinary(node.operator, current, value);
+        this.setAttribute(obj, target.name, result);
+      } else if (target.type === ASTNodeType.SUBSCRIPT) {
+        obj = this.evaluateExpression(target.object, scope);
+        if (target.index && target.index.type === ASTNodeType.SLICE) {
+          index = {
+            type: ASTNodeType.SLICE,
+            start: target.index.start ? this.evaluateExpression(target.index.start, scope) : null,
+            end: target.index.end ? this.evaluateExpression(target.index.end, scope) : null,
+            step: target.index.step ? this.evaluateExpression(target.index.step, scope) : null,
+          };
+          current = this.getSubscript(obj, index);
+        } else {
+          index = this.evaluateExpression(target.index, scope);
+          current = this.getSubscript(obj, index);
+        }
+        const value = this.evaluateExpression(node.value, scope);
+        const result = this.applyInPlaceBinary(node.operator, current, value);
+
+        if (Array.isArray(obj)) {
+          if ((obj as any).__tuple__) {
+            throw new PyException('TypeError', "'tuple' object does not support item assignment");
+          }
+          if (index && index.type === ASTNodeType.SLICE) {
+            const start = index.start !== null ? index.start : null;
+            const end = index.end !== null ? index.end : null;
+            const step = index.step !== null ? index.step : null;
+            const stepValue = step !== null && step !== undefined ? step : 1;
+            const values = this.toIterableArray(result);
+            if (stepValue === 1) {
+              const bounds = this.computeSliceBounds(obj.length, start, end, stepValue);
+              obj.splice(bounds.start, bounds.end - bounds.start, ...values);
+            } else {
+              const indices = this.computeSliceIndices(obj.length, start, end, stepValue);
+              if (values.length !== indices.length) {
+                throw new PyException(
+                  'ValueError',
+                  `attempt to assign sequence of size ${values.length} to extended slice of size ${indices.length}`
+                );
+              }
+              for (let i = 0; i < indices.length; i++) {
+                obj[indices[i]] = values[i];
+              }
+            }
+          } else {
+            obj[index] = result;
+          }
+        } else if (obj instanceof PyDict) {
+          obj.set(index, result);
+        } else {
+          // For other types, we might need a general setItem
+          // But based on assignTarget, it only supports Array and PyDict
+          throw new PyException('TypeError', 'unsupported subscript assignment');
+        }
+      } else {
+        throw new PyException('TypeError', 'illegal expression for augmented assignment');
+      }
       return null;
     }
     case ASTNodeType.IF_STATEMENT: {
@@ -92,7 +159,8 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
         }
         return param;
       });
-      const fn = new PyFunction(node.name, params, node.body, scope, this.containsYield(node.body));
+      const closure = scope.isClassScope ? (scope.parent as Scope) : scope;
+      const fn = new PyFunction(node.name, params, node.body, closure, this.containsYield(node.body));
       scope.set(node.name, fn);
       if (node.decorators && node.decorators.length > 0) {
         let decorated: any = fn;
@@ -106,7 +174,7 @@ export function executeStatement(this: VirtualMachine, node: any, scope: Scope):
     }
     case ASTNodeType.CLASS_DEF: {
       const bases = node.bases?.map((b: any) => this.evaluateExpression(b, scope)) || [];
-      const classScope = new Scope(scope);
+      const classScope = new Scope(scope, true);
       this.executeBlock(node.body, classScope);
       const attributes = new Map(classScope.values.entries());
       const isException = bases.some((b: any) => b instanceof PyClass && b.isException);

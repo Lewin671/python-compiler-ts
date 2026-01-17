@@ -27,17 +27,23 @@ export class Scope {
   parent: Scope | null;
   globals: Set<string> = new Set();
   nonlocals: Set<string> = new Set();
+  isClassScope: boolean = false;
 
-  constructor(parent: Scope | null = null) {
+  constructor(parent: Scope | null = null, isClassScope: boolean = false) {
     this.parent = parent;
+    this.isClassScope = isClassScope;
   }
 
   get(name: string): ScopeValue {
     if (this.values.has(name)) {
       return this.values.get(name);
     }
-    if (this.parent) {
-      return this.parent.get(name);
+    let p = this.parent;
+    while (p && p.isClassScope) {
+      p = p.parent;
+    }
+    if (p) {
+      return p.get(name);
     }
     throw new PyException('NameError', `name '${name}' is not defined`);
   }
@@ -48,7 +54,11 @@ export class Scope {
       return;
     }
     if (this.nonlocals.has(name) && this.parent) {
-      const scope = this.parent.findScopeWith(name);
+      let p = this.parent;
+      while (p && p.isClassScope) {
+        p = p.parent;
+      }
+      const scope = p ? p.findScopeWith(name) : null;
       if (!scope) {
         throw new PyException('NameError', `no binding for nonlocal '${name}' found`);
       }
@@ -71,6 +81,9 @@ export class Scope {
     while (scope) {
       if (scope.values.has(name)) return scope;
       scope = scope.parent;
+      while (scope && scope.isClassScope) {
+        scope = scope.parent;
+      }
     }
     return null;
   }
