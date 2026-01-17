@@ -1,6 +1,6 @@
 # @lewin671/python-vm
 
-[![License](https://img.shields.io/github/license/Lewin671/python-compiler-ts)](https://github.com/Lewin671/python-compiler-ts/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/Lewin671/python-vm)](https://github.com/Lewin671/python-vm/blob/main/LICENSE)
 [![NPM Version](https://img.shields.io/npm/v/@lewin671/python-vm)](https://www.npmjs.com/package/@lewin671/python-vm)
 
 A high-performance Python compiler and Virtual Machine (VM) implemented entirely in TypeScript. This project aims to provide a robust, Python-compliant execution environment within the JavaScript ecosystem, featuring a complete compilation pipeline from source code to bytecode.
