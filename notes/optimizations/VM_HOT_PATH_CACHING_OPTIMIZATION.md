@@ -10,7 +10,7 @@ Optimized hot paths in the Python VM by introducing cached f-string/expression p
 - **Python Version**: 3.12.3
 - **CPU**: AMD EPYC 7763 64-Core Processor
 - **OS**: Linux
-- **Date**: January 18, 2026
+- **Date**: January 18, 2026 (benchmark run)
 
 ## Baseline Performance
 
