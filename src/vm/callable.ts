@@ -2,6 +2,7 @@ import type { VirtualMachine } from './vm';
 import { ASTNodeType } from '../types';
 import { FastCallInfo, PyValue, PyClass, PyDict, PyException, PyFunction, PyGenerator, PyInstance, ReturnSignal, Scope, Frame } from './runtime-types';
 
+
 const buildFastCallInfo = (func: PyFunction): FastCallInfo | null => {
   if (!func.bytecode || !func.bytecode.instructions || func.isGenerator) return null;
   const paramNames: string[] = [];

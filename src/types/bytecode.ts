@@ -14,6 +14,14 @@ export interface ByteCode {
   name?: string;      // 函数名或代码块名
   globals?: string[];
   nonlocals?: string[];
+  jit?: JITMetadata;
+}
+
+export interface JITMetadata {
+  opcodes?: Uint16Array;
+  args?: Int32Array;
+  hasExceptionHandlers?: boolean;
+  fastPathSupported?: boolean;
 }
 
 export interface Instruction {

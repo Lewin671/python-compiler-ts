@@ -1,6 +1,7 @@
 import type { VirtualMachine } from './vm';
 import { ByteCode, OpCode, ASTNodeType, CompareOp } from '../types';
 import { PyValue, PyClass, PyDict, PyException, PyFunction, PyInstance, PyRange, PySet, Scope, Frame } from './runtime-types';
+import { callArgPools, fastIteratorSymbol } from './execution-shared';
 
 type FStringPart =
   | { kind: 'text'; value: string }
@@ -20,8 +21,7 @@ const pruneFStringCache = () => {
     fStringCache.delete(entries[i][0]);
   }
 };
-const fastIteratorSymbol = Symbol('fastIterator');
-const callArgPools: PyValue[][][] = [[], [], [], [], []];
+const callArgPoolsTyped = callArgPools as PyValue[][][];
 
 export function execute(this: VirtualMachine, bytecode: ByteCode): PyValue {
   const globalScope = new Scope();
@@ -32,6 +32,15 @@ export function execute(this: VirtualMachine, bytecode: ByteCode): PyValue {
 }
 
 export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
+  const jit = this.jitManager;
+  if (jit && jit.isEnabled()) {
+    const result = jit.onEnterFrame(this, frame);
+    if (result.handled) return result.value;
+  }
+  return executeFrameInterpreter.call(this, frame);
+}
+
+export function executeFrameInterpreter(this: VirtualMachine, frame: Frame): PyValue {
   const { instructions, constants, names, varnames } = frame.bytecode;
   // console.log('Executing frame with names:', names);
 
@@ -78,6 +87,18 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
     }
   };
   const iterSymbol = Symbol.iterator;
+  const jitMeta = frame.bytecode.jit;
+  const fastOpcodes = jitMeta?.opcodes;
+  const fastArgs = jitMeta?.args;
+  let hasExceptionHandlers = jitMeta?.hasExceptionHandlers;
+  if (hasExceptionHandlers === undefined) {
+    hasExceptionHandlers = computeHasExceptionHandlers(instructions);
+    if (jitMeta) {
+      jitMeta.hasExceptionHandlers = hasExceptionHandlers;
+    } else {
+      frame.bytecode.jit = { hasExceptionHandlers };
+    }
+  }
 
   const renderFString = (template: string, scope: Scope): string => {
     let entry = fStringCache.get(template);
@@ -168,19 +189,32 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
     return true;
   };
 
-  while (frame.pc < instructions.length) {
-    const instr = instructions[frame.pc++];
-    if (!instr) break;
-    const { opcode, arg } = instr;
+  const useFastDispatch = !!(fastOpcodes && fastArgs);
+  const instructionCount = instructions.length;
 
-    try {
+  while (frame.pc < instructionCount) {
+      const pc = frame.pc++;
+      let opcode: OpCode;
+      let arg: number | undefined;
+
+      if (useFastDispatch) {
+        opcode = fastOpcodes![pc] as OpCode;
+        arg = fastArgs![pc];
+      } else {
+        const instr = instructions[pc];
+        if (!instr) break;
+        opcode = instr.opcode;
+        arg = instr.arg;
+      }
+
       // Switch cases ordered by execution frequency (hot paths first)
       // Based on dynamic opcode execution profiling across benchmark workloads:
       // - Fibonacci recursion, list operations, nested loops, dictionary ops, etc.
       // - LOAD_FAST (22-23%), LOAD_CONST (18%), LOAD_NAME (9-33%) are hottest
       // - All 73 cases reordered: frequent ops first, then grouped by category
       // This reduces average case evaluations and improves branch prediction
-      switch (opcode) {
+      try {
+        switch (opcode) {
         // === HOT PATH: Most frequently executed opcodes (>5% execution time) ===
         case OpCode.LOAD_FAST: {
           // Optimize common case: value is in locals
@@ -261,7 +295,7 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.CALL_FUNCTION: {
           const argCount = arg!;
-          const pool = argCount <= 4 ? callArgPools[argCount] : null;
+          const pool = argCount <= 4 ? callArgPoolsTyped[argCount] : null;
           const args = pool && pool.length > 0 ? pool.pop()! : new Array(argCount);
           // Pop arguments in reverse order
           for (let i = argCount - 1; i >= 0; i--) {
@@ -1056,17 +1090,33 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         default:
           throw new Error(`VM: Unknown opcode ${OpCode[opcode]} (${opcode}) at pc ${frame.pc - 1}`);
+        }
+      } catch (err) {
+        if (dispatchException(err)) {
+          continue;
+        }
+        throw err;
       }
-    } catch (err) {
-      if (dispatchException(err)) {
-        continue;
-      }
-      throw err;
-    }
   }
 
   return lastValue;
 }
+
+const computeHasExceptionHandlers = (instructions: { opcode: OpCode }[]): boolean => {
+  for (let i = 0; i < instructions.length; i++) {
+    const opcode = instructions[i].opcode;
+    switch (opcode) {
+      case OpCode.SETUP_FINALLY:
+      case OpCode.SETUP_WITH:
+      case OpCode.WITH_EXCEPT_START:
+      case OpCode.POP_BLOCK:
+        return true;
+      default:
+        break;
+    }
+  }
+  return false;
+};
 
 export {
   applyCompare,

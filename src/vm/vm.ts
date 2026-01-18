@@ -1,6 +1,7 @@
 import { installBuiltins } from './builtins';
 import { callFunction, containsYield, evaluateComprehension, expressionHasYield, generateComprehension } from './callable';
-import { execute, executeFrame, executeBlock, executeBlockGenerator, executeStatementGenerator, iterableToArray, matchPattern, matchValueEquals, applyBindings, applyCompare } from './execution';
+import { execute, executeFrame, executeFrameInterpreter, executeBlock, executeBlockGenerator, executeStatementGenerator, iterableToArray, matchPattern, matchValueEquals, applyBindings, applyCompare } from './execution';
+import { JITManager } from '../jit';
 import { evaluateExpressionGenerator } from './expression-generator';
 import { createAsyncioModule, importModule, loadModuleFromFile, resolveModulePath } from './imports';
 import {
@@ -31,13 +32,17 @@ import { PyValue } from './runtime-types';
 export class VirtualMachine {
   public moduleCache: Map<string, PyValue> = new Map();
   public moduleSearchPaths: string[];
+  public jitManager?: JITManager;
 
   constructor(moduleSearchPaths: string[] = [process.cwd()]) {
     this.moduleSearchPaths = moduleSearchPaths;
+    const jit = JITManager.fromEnv();
+    if (jit) this.jitManager = jit;
   }
 
   execute = execute;
   executeFrame = executeFrame;
+  executeFrameInterpreter = executeFrameInterpreter;
   installBuiltins = installBuiltins;
   importModule = importModule;
   createAsyncioModule = createAsyncioModule;
