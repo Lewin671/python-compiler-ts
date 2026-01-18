@@ -1,5 +1,5 @@
 import type { VirtualMachine } from './vm';
-import { PyValue, PyClass, PyDict, PyException, PyFile, PyGenerator, PyInstance, PySet, Scope } from './runtime-types';
+import { PyValue, PyClass, PyDict, PyException, PyFile, PyGenerator, PyInstance, PyRange, PySet, Scope } from './runtime-types';
 import { isFloatLike, isNumericLike, pyStr, pyTypeName, toBigIntValue, toNumber } from './value-utils';
 
 export function installBuiltins(this: VirtualMachine, scope: Scope) {
@@ -22,6 +22,7 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
   });
   builtins.set('len', (value: PyValue) => {
     if (typeof value === 'string' || Array.isArray(value)) return value.length;
+    if (value instanceof PyRange) return value.length;
     if (value instanceof PyDict || value instanceof PySet) return value.size;
     throw new PyException('TypeError', 'object has no len()');
   });
@@ -39,14 +40,8 @@ export function installBuiltins(this: VirtualMachine, scope: Scope) {
       end = toNumber(args[1]);
       step = toNumber(args[2]);
     }
-    const result: number[] = [];
     if (step === 0) throw new PyException('ValueError', 'range() arg 3 must not be zero');
-    if (step > 0) {
-      for (let i = start; i < end; i += step) result.push(i);
-    } else {
-      for (let i = start; i > end; i += step) result.push(i);
-    }
-    return result;
+    return new PyRange(start, end, step);
   });
   const listFn = (value: PyValue) => {
     if (Array.isArray(value)) return [...value];

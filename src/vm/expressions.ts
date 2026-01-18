@@ -272,14 +272,26 @@ export function evaluateExpression(this: VirtualMachine, node: PyValue, scope: S
   }
 }
 
+const expressionCache = new Map<string, PyValue | null>();
+
 export function evaluateExpressionString(this: VirtualMachine, expr: string, scope: Scope): PyValue {
+  const trimmed = expr.trim();
+  const cached = expressionCache.get(trimmed);
+  if (cached !== undefined) {
+    if (cached === null) {
+      return this.executeExpressionInline(trimmed, scope);
+    }
+    return this.evaluateExpression(cached, scope);
+  }
   const wrapped = `__f = ${expr} \n`;
   const tokens = new Lexer(wrapped).tokenize();
   const ast = new Parser(tokens).parse();
   const assignment = (ast as Program).body[0];
   if (!assignment || assignment.type !== ASTNodeType.ASSIGNMENT) {
+    expressionCache.set(trimmed, null);
     return this.executeExpressionInline(expr, scope);
   }
+  expressionCache.set(trimmed, assignment.value);
   return this.evaluateExpression(assignment.value, scope);
 }
 
@@ -357,4 +369,3 @@ export function contains(this: VirtualMachine, container: PyValue, value: PyValu
   if (container instanceof PyDict) return container.has(value);
   return false;
 }
-

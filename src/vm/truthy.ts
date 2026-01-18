@@ -1,5 +1,5 @@
 import type { VirtualMachine } from './vm';
-import { PyValue, PyDict, PyException, PyInstance, PySet, Scope } from './runtime-types';
+import { PyValue, PyDict, PyException, PyInstance, PyRange, PySet, Scope } from './runtime-types';
 import { isNumericLike, toNumber } from './value-utils';
 
 export function isTruthy(this: VirtualMachine, value: PyValue, scope: Scope): boolean {
@@ -10,6 +10,7 @@ export function isTruthy(this: VirtualMachine, value: PyValue, scope: Scope): bo
   if (typeof value === 'bigint') return value !== 0n;
   if (typeof value === 'string') return value.length > 0;
   if (Array.isArray(value)) return value.length > 0;
+  if (value instanceof PyRange) return value.length > 0;
   if (value instanceof PyDict) return value.size > 0;
   if (value instanceof PySet) return value.size > 0;
   if (value instanceof PyInstance) {

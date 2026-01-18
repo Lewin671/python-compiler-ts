@@ -232,6 +232,51 @@ export class PyGenerator {
   }
 }
 
+export class PyRange {
+  start: number;
+  end: number;
+  step: number;
+  length: number;
+
+  constructor(start: number, end: number, step: number) {
+    this.start = start;
+    this.end = end;
+    this.step = step;
+    const span = step > 0 ? end - start : start - end;
+    const stepSize = Math.abs(step);
+    this.length = span > 0 ? Math.ceil(span / stepSize) : 0;
+  }
+
+  [Symbol.iterator](): Iterator<number> {
+    return new PyRangeIterator(this.start, this.end, this.step);
+  }
+}
+
+class PyRangeIterator {
+  private current: number;
+  private end: number;
+  private step: number;
+
+  constructor(start: number, end: number, step: number) {
+    this.current = start;
+    this.end = end;
+    this.step = step;
+  }
+
+  next(): IteratorResult<number> {
+    if (this.step > 0 ? this.current < this.end : this.current > this.end) {
+      const value = this.current;
+      this.current += this.step;
+      return { value, done: false };
+    }
+    return { value: undefined, done: true };
+  }
+
+  [Symbol.iterator](): Iterator<number> {
+    return this;
+  }
+}
+
 export type DictEntry = { key: PyValue; value: PyValue };
 
 export class PyDict {

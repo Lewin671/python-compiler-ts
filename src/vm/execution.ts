@@ -1,6 +1,6 @@
 import type { VirtualMachine } from './vm';
 import { ByteCode, OpCode, ASTNodeType, CompareOp } from '../types';
-import { PyValue, PyClass, PyDict, PyException, PyFunction, PyInstance, PySet, Scope, Frame } from './runtime-types';
+import { PyValue, PyClass, PyDict, PyException, PyFunction, PyInstance, PyRange, PySet, Scope, Frame } from './runtime-types';
 
 export function execute(this: VirtualMachine, bytecode: ByteCode): PyValue {
   const globalScope = new Scope();
@@ -33,6 +33,7 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
   const locals = frame.locals;
   const scope = frame.scope;
   const scopeValues = scope.values;
+  const syncLocals = varnames ? varnames.map((name) => name !== undefined && scopeValues.has(name)) : null;
   const iterSymbol = Symbol.iterator;
 
   const renderFString = (template: string, scope: Scope): string => {
@@ -107,11 +108,11 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
           let val = locals[arg!];
           if (val === undefined) {
             // Check scope values as fallback
-            const varname = varnames[arg!];
-            if (varname !== undefined && scopeValues.has(varname)) {
-              val = scopeValues.get(varname);
+            if (syncLocals && syncLocals[arg!]) {
+              val = scopeValues.get(varnames[arg!]!);
               locals[arg!] = val;
             } else {
+              const varname = varnames[arg!];
               throw new PyException('UnboundLocalError', `local variable '${varname}' referenced before assignment`);
             }
           }
@@ -236,8 +237,8 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
         case OpCode.STORE_FAST: {
           const val = stack.pop();
           locals[arg!] = val;
-          if (varnames && varnames[arg!] !== undefined) {
-            scopeValues.set(varnames[arg!], val);
+          if (syncLocals && syncLocals[arg!]) {
+            scopeValues.set(varnames[arg!]!, val);
           }
           break;
         }
@@ -248,6 +249,28 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.FOR_ITER: {
           const iter = stack[stack.length - 1];
+          if (iter && iter.__fastIter__ === 'array') {
+            const idx = iter.index;
+            if (idx >= iter.data.length) {
+              stack.pop();
+              frame.pc = arg!;
+            } else {
+              stack.push(iter.data[idx]);
+              iter.index = idx + 1;
+            }
+            break;
+          }
+          if (iter && iter.__fastIter__ === 'range') {
+            const current = iter.current;
+            if (iter.step > 0 ? current < iter.end : current > iter.end) {
+              stack.push(current);
+              iter.current = current + iter.step;
+            } else {
+              stack.pop();
+              frame.pc = arg!;
+            }
+            break;
+          }
           const next = iter.next();
           if (next.done) {
             stack.pop();
@@ -304,7 +327,11 @@ export function executeFrame(this: VirtualMachine, frame: Frame): PyValue {
 
         case OpCode.GET_ITER: {
           const obj = stack.pop();
-          if (obj && typeof obj[iterSymbol] === 'function') {
+          if (Array.isArray(obj)) {
+            stack.push({ __fastIter__: 'array', data: obj, index: 0 });
+          } else if (obj instanceof PyRange) {
+            stack.push({ __fastIter__: 'range', current: obj.start, end: obj.end, step: obj.step });
+          } else if (obj && typeof obj[iterSymbol] === 'function') {
             stack.push(obj[iterSymbol]());
           } else {
             throw new PyException('TypeError', `'${typeof obj}' object is not iterable`);

@@ -16,6 +16,13 @@ export function callFunction(
   if (func instanceof PyFunction) {
     const callScope = new Scope(func.closure);
     callScope.locals = new Set(func.localNames);
+    if (func.bytecode?.varnames) {
+      for (const name of func.bytecode.varnames) {
+        if (name !== undefined) {
+          callScope.locals.add(name);
+        }
+      }
+    }
     if (func.bytecode) {
       if (func.bytecode.globals) {
         func.bytecode.globals.forEach((g: string) => callScope.globals.add(g));
@@ -24,11 +31,13 @@ export function callFunction(
         func.bytecode.nonlocals.forEach((n: string) => callScope.nonlocals.add(n));
       }
     }
+    let argIndex = 0;
+    const argsLength = args.length;
     for (const param of func.params) {
       if (param.type === 'Param') {
         let argValue: PyValue;
-        if (args.length > 0) {
-          argValue = args.shift();
+        if (argIndex < argsLength) {
+          argValue = args[argIndex++];
         } else if (param.name in kwargs) {
           argValue = kwargs[param.name];
           delete kwargs[param.name];
@@ -41,10 +50,10 @@ export function callFunction(
         }
         callScope.set(param.name, argValue);
       } else if (param.type === 'VarArg') {
-        const varArgs = [...args];
+        const varArgs = args.slice(argIndex);
         (varArgs as PyValue).__tuple__ = true;
         callScope.set(param.name, varArgs);
-        args = [];
+        argIndex = argsLength;
       } else if (param.type === 'KwArg') {
         const kwDict = new PyDict();
         for (const [key, value] of Object.entries(kwargs)) {
