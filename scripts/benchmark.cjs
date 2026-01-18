@@ -6,6 +6,7 @@ const { PythonCompiler } = require('../dist/index.js');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const pythonCmd = process.env['PYTHON'] || 'python3';
 
@@ -268,13 +269,9 @@ print(sum(result))
     log.warn('Slow execution, 20x+ slower than CPython (expected for interpreted VM)');
   }
 
-  const reportDir = path.join(__dirname, '../reports');
-  if (!fs.existsSync(reportDir)) {
-    fs.mkdirSync(reportDir, { recursive: true });
-  }
-
+  const tmpDir = os.tmpdir();
   const reportPath = path.join(
-    reportDir,
+    tmpDir,
     `benchmark_v${vmVersion}.json`
   );
 
